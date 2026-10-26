@@ -148,6 +148,23 @@ module.exports = async function handler(req, res) {
   if (/^(hi|hlw|hello|hey|হাই|হ্যালো|হেলো|হ্যালোও|আসসালামু আলাইকুম)$/.test(greeting)) {
     return respondText(req, res, "হাই! আমি Shakil AI Assistant! 😊\n\nআমি আপনার সাহায্যের জন্য এখানে আছি। আমি কীভাবে আপনাকে সাহায্য করতে পারি?");
   }
+  // Handle common short conversational turns deterministically so free models cannot derail them.
+  const plainLatest = typeof latestUserMessage?.content === "string" ? latestUserMessage.content.trim() : "";
+  const normalizedLatest = plainLatest.toLowerCase().replace(/[!?.,。！？؟]+$/g, "").replace(/\s+/g, " ");
+  const previousAssistant = [...messages.slice(0, -1)].reverse().find(m => m.role === "assistant");
+  let quickReply = "";
+  if (/^(tmr|tomar|তোমার)\s*(name|naam|নাম)\s*(ki|কী|কি)$/.test(normalizedLatest)) {
+    quickReply = "আমার নাম Shakil AI Assistant 😊";
+  } else if (/^(tomake|tumi|tmk|তোমাকে|তুমি)\s*(ke|কে)\s*(baniyeche|baniyese|banayche|banaiছে|বানিয়েছে|বানিয়েছে|বানাইছে|তৈরি করেছে)$/.test(normalizedLatest) || /^(who made you|who created you|amke ke baniyese go|tomake ke baniyese go)$/.test(normalizedLatest)) {
+    quickReply = "আমাকে তৈরি করেছে Shakil 😊";
+  } else if (/^shakil ke$/.test(normalizedLatest) || /^শাকিল কে$/.test(normalizedLatest)) {
+    quickReply = "Shakil হলো এই AI Assistant-এর নির্মাতা।";
+  } else if (/^(kisu na|kichu na|কিছু না|কিছুই না|nothing)$/.test(normalizedLatest)) {
+    quickReply = "আচ্ছা, ঠিক আছে 😄";
+  } else if (/^(na|না|no)$/.test(normalizedLatest)) {
+    quickReply = "আচ্ছা, ঠিক আছে 😊";
+  }
+  if (quickReply) return respondText(req, res, quickReply);
   const externalKey = req.headers["x-shakil-api-key"] || (String(req.headers.authorization || "").startsWith("Bearer sk-shakil-") ? String(req.headers.authorization).slice(7) : "");
   const origin = String(req.headers.origin || "");
   let isOwnWebsite = false;
