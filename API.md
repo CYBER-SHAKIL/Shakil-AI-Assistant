@@ -1,57 +1,51 @@
-# Shakil GPT API / Backend Guide
+# Shakil AI Assistant — API Setup
 
-This repository uses the official OpenAI API, not OpenRouter.
+The chat backend uses **OpenRouter**. The OpenRouter key must stay on Vercel and must never be added to `index.html`, browser storage, or GitHub.
 
-## 1. Vercel environment
+## 1. Add the OpenRouter key in Vercel
 
-Required:
-- `OPENAI_API_KEY`: a fresh OpenAI API key stored only in Vercel Environment Variables.
+1. Open the [Vercel project](https://vercel.com/cyber-shakils-projects/shakil-ai-assistant).
+2. Go to **Settings → Environment Variables**.
+3. Add:
+   - **Key:** `OPENROUTER_API_KEY`
+   - **Value:** your OpenRouter API key (starts with `sk-or-v1-`)
+   - **Environments:** Production, Preview, and Development.
+4. Save the variable, then go to **Deployments** and redeploy the latest production deployment (or push a new commit).
+
+Do not send your key in chat or commit it to GitHub.
 
 Optional:
-- `OPENAI_CHAT_MODEL=gpt-6.1-sol`
-- `OPENAI_IMAGE_MODEL=gpt-image-2.5-flare`
+- `OPENROUTER_DEFAULT_MODEL=google/gemma-4-31b-it:free`
+- `APP_URL=https://shakil-ai-assistant-lime.vercel.app`
 
-After changing environment variables, redeploy the project. Never commit secrets to GitHub. Revoke keys exposed in chats or source code.
+The site defaults to `google/gemma-4-31b-it:free`, loads currently available free models from `GET /api/models`, and allows choosing a model in Settings. The server accepts free model IDs ending in `:free` plus `openrouter/free`. Chat requests also configure `openrouter/free` as the fallback route.
 
-## 2. Chat
+## 2. Chat, coding, and image understanding
 
-`POST /api/chat`
+- `POST /api/chat` — text chat, coding help, streaming responses, and attached-image understanding when the selected model supports image input.
+- `GET /api/models` — retrieves the currently available free OpenRouter models and their image-input capability.
+
+Example request:
 
 ```json
 {
-  "model": "gpt-6.1-sol",
-  "stream": false,
+  "model": "google/gemma-4-31b-it:free",
+  "stream": true,
   "messages": [
-    { "role": "user", "content": "তোমার নির্মাতা কে?" }
+    { "role": "user", "content": "তোমার developer কে?" }
   ]
 }
 ```
 
-Non-streaming response: `{ "reply": "...", "id": "...", "model": "..." }`.
-The website uses `stream: true` for live text output.
+The browser sends attached images as multimodal `image_url` content to `/api/chat`. Choose a model marked as supporting image input for image questions. Availability and free limits can change on OpenRouter.
 
-Models allowed: `gpt-6-luna`, `gpt-6.1-sol`, `gpt-6-astra`.
+## 3. Image generation is separate
 
-## 3. Image generation
+The current `POST /api/generate-image` endpoint still uses an OpenAI image-generation API and therefore requires a separate `OPENAI_API_KEY` in Vercel. An OpenRouter key alone does not enable this endpoint. If you only add the OpenRouter key, chat, coding, free-model selection, and supported image understanding can work, but image generation will remain unavailable until its backend is changed to a compatible image provider and configured with that provider's key.
 
-`POST /api/generate-image`
+## 4. Security and limitations
 
-```json
-{
-  "prompt": "A cinematic sunset over a river in Bangladesh",
-  "model": "gpt-image-2.5-flare"
-}
-```
-
-Returns `imageBase64`, `mimeType`, and `caption`. Models allowed: `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`, `gpt-image-2`.
-
-## 4. Calling from another server
-
-A bot backend may send its own OpenAI API key in `Authorization: Bearer YOUR_OWN_OPENAI_API_KEY`. Never embed a private key in browser JavaScript or public HTML. The endpoint can otherwise fall back to the website's configured server key, which creates abuse and billing risk if the endpoint is shared publicly.
-
-## 5. Current limitations / production hardening
-
-- The current per-IP limiter is in-memory and not persistent across serverless instances.
-- No database-backed user login, API key creation/revocation, per-user quota, or billing system is included yet.
-- Add persistent rate limiting, authentication, usage tracking, and abuse monitoring before publishing a public third-party API.
-- OpenAI API usage may be billed separately from ChatGPT subscriptions; confirm model access and billing in the OpenAI Platform.
+- Never put API keys in public HTML or frontend JavaScript.
+- The current rate limiter is in-memory and does not persist across Vercel serverless instances.
+- Public endpoints can be abused; monitor OpenRouter usage and limits.
+- Free model availability, vision support, context limits, and routing behavior may change.
