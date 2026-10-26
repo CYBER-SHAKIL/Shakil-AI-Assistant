@@ -16,9 +16,9 @@ A static frontend with Vercel serverless backend endpoints for OpenAI text chat 
 ## Models
 
 Defaults:
-- Chat: `gpt-6-luna` — fast and cost-efficient for everyday chat.
-- Alternative: `gpt-6.1-sol` — better balance for more demanding questions.
-- Alternative: `gpt-6-astra` — strongest for complex reasoning/coding, usually higher cost.
+- Chat: `gpt-6.1-sol` — default balanced model.
+- Alternative: `gpt-6-luna` — fast everyday chat.
+- Alternative: `gpt-6-astra` — for complex reasoning/coding, subject to account access.
 - Image: `gpt-image-2.5-flare` — recommended for fast, high-quality everyday image generation.
 - Image alternative: `gpt-image-2.5-sunburst` — consider for image edits/precision-focused work.
 
@@ -30,7 +30,7 @@ Availability, pricing, rate limits, and organization verification depend on the 
 2. Open Vercel → select `shakil-ai-assistant` → Settings → Environment Variables.
 3. Add `OPENAI_API_KEY` with the new OpenAI API key. Select Production (and Preview/Development only if needed).
 4. Optional variables:
-   - `OPENAI_CHAT_MODEL` — default `gpt-6-luna`
+   - `OPENAI_CHAT_MODEL` — default `gpt-6.1-sol`
    - `OPENAI_IMAGE_MODEL` — default `gpt-image-2.5-flare`
 5. Save, then redeploy the latest deployment so the environment variables take effect.
 6. Test the site with one Bengali chat question, then test Image Mode.
@@ -44,7 +44,7 @@ Never put `OPENAI_API_KEY` in `index.html`, frontend JavaScript, a committed `.e
 Request:
 ```json
 {
-  "model": "gpt-6-luna",
+  "model": "gpt-6.1-sol",
   "stream": true,
   "messages": [
     { "role": "user", "content": "তোমাকে কে তৈরি করেছে?" }
