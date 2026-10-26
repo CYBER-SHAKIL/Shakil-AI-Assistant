@@ -175,6 +175,21 @@ module.exports = async function handler(req, res) {
   try { const host = new URL(origin).host; const appHost = new URL(process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app").host; isOwnWebsite = host === appHost || host === "shakil-ai-assistant-lime.vercel.app" || host === "shakil-ai-assistant.vercel.app"; } catch {}
   if (!isOwnWebsite && !externalKey) return json(res, 401, { error: "A Shakil API key is required for external project requests." });
   if (externalKey && !(await verifyShakilApiKey(externalKey))) return json(res, 401, { error: "Invalid or revoked Shakil API key." });
+  // Deterministic handling for common short Bengali/Banglish conversation turns.
+  const latestText = typeof latestUserMessage?.content === "string" ? latestUserMessage.content.trim().toLowerCase().replace(/[!?.,。！？؟]+$/g, "").replace(/\s+/g, " ") : "";
+  let quickReply = "";
+  if (/^(tmr|tomar|তোমার)\s*(name|naam|নাম)\s*(ki|কী|কি)$/.test(latestText)) {
+    quickReply = "আমার নাম Shakil AI Assistant 😊";
+  } else if (/^(tomake|tumi|tmk|amke|তোমাকে|তুমি|আমাকে)\s*(ke|কে)\s*(baniyeche|baniyese|banayche|বানিয়েছে|বানিয়েছে|বানাইছে|তৈরি করেছে)?$/.test(latestText) || /^(who made you|who created you|amke ke baniyese go|tomake ke baniyese go)$/.test(latestText)) {
+    quickReply = "আমাকে তৈরি করেছে Shakil 😊";
+  } else if (/^(shakil ke|শাকিল কে)$/.test(latestText)) {
+    quickReply = "Shakil হলো এই AI Assistant-এর নির্মাতা।";
+  } else if (/^(kisu na|kichu na|কিছু না|কিছুই না|nothing)$/.test(latestText)) {
+    quickReply = "আচ্ছা, ঠিক আছে 😄";
+  } else if (/^(na|না|no)$/.test(latestText)) {
+    quickReply = "আচ্ছা, ঠিক আছে 😊";
+  }
+  if (quickReply) return respondText(req, res, quickReply);
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return json(res, 503, { error: "Vercel-এ OPENROUTER_API_KEY Environment Variable যোগ করতে হবে।" });
   const requested = typeof body.model === "string" ? body.model : DEFAULT_MODEL;
