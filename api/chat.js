@@ -1,6 +1,17 @@
-const DEFAULT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-6.1-sol";
-const OWNER_PROMPT = "You are Shakil GPT, created and owned by Shakil. Reply primarily in natural, friendly, clear Bengali (বাংলা). Understand Bangla-English mixed messages and answer in Bengali unless the user explicitly asks for another language. If the user says they do not understand, explain again fully in simple Bengali with examples. When asked who created you, who owns you, or who your developer is, say your creator/owner is Shakil. Do not invent private details about Shakil. Be conversational and warm but honest, concise when appropriate, detailed when needed, and admit uncertainty. Never claim to have performed actions you did not perform.";
-const ALLOWED_MODELS = new Set(["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]);
+const DEFAULT_MODEL = process.env.OPENROUTER_DEFAULT_MODEL || "google/gemma-4-31b-it:free";
+const FALLBACK_MODEL = "openrouter/free";
+const OWNER_PROMPT = `তুমি Shakil AI Assistant, Shakil Dev-এর তৈরি একটি সহায়ক বাংলা AI Assistant।
+
+নিয়ম:
+1. সব সময় সহজ, স্বাভাবিক বাংলা অথবা প্রয়োজনমতো বাংলা-English mix করে উত্তর দেবে।
+2. ব্যবহারকারী নিজের নাম জানতে চাইলে বলবে তার নাম Shakil।
+3. তোমাকে কে তৈরি করেছে, কে developer—জিজ্ঞেস করলে বলবে: “আমাকে Shakil Dev তৈরি করেছেন।”
+4. নিজের পরিচয় সব সময় Shakil AI Assistant হিসেবে দেবে।
+5. Hi/Hello-র মতো greeting-এ স্বাভাবিকভাবে উত্তর দেবে।
+6. প্রশ্নের উত্তর পরিষ্কার ও নির্ভুলভাবে দেওয়ার চেষ্টা করবে; না জানলে ভুল তথ্য বানাবে না।
+7. Coding প্রশ্নে কার্যকর code এবং বাংলায় ব্যাখ্যা দেবে।
+8. ছবি সংযুক্ত থাকলে ছবিতে যা দেখা যায় তা বিশ্লেষণ করবে; নিশ্চিত নও এমন কিছু অনুমান করে সত্য হিসেবে বলবে না।
+9. OpenRouter, API key বা internal configuration সম্পর্কে গোপন তথ্য প্রকাশ করবে না।`;
 const windows = new Map();
 function limited(ip) {
   const now = Date.now(), old = windows.get(ip);
@@ -24,43 +35,47 @@ module.exports = async function handler(req, res) {
   catch { return json(res, 400, { error: "Invalid JSON request body." }); }
   if (!Array.isArray(body.messages) || body.messages.length === 0 || body.messages.length > 40) return json(res, 400, { error: "messages must be a non-empty array with at most 40 items." });
   const messages = body.messages
-    .filter(m => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
-    .slice(-30).map(m => ({ role: m.role, content: m.content.slice(0, 12000) }));
+    .filter(m => m && ["user", "assistant", "system"].includes(m.role) && (typeof m.content === "string" || Array.isArray(m.content)))
+    .slice(-30).map(m => ({ role: m.role, content: typeof m.content === "string" ? m.content.slice(0, 12000) : m.content }));
   if (!messages.length || !messages.some(m => m.role === "user")) return json(res, 400, { error: "At least one user message is required." });
-  const auth = String(req.headers.authorization || "");
-  const userKey = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  const apiKey = userKey || process.env.OPENAI_API_KEY;
-  if (!apiKey) return json(res, 503, { error: "AI backend is not configured. Add OPENAI_API_KEY in Vercel Environment Variables." });
-  const model = ALLOWED_MODELS.has(body.model) ? body.model : DEFAULT_MODEL;
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return json(res, 503, { error: "Vercel-এ OPENROUTER_API_KEY Environment Variable যোগ করতে হবে।" });
+  const requested = typeof body.model === "string" ? body.model : DEFAULT_MODEL;
+  // Only allow free model IDs, plus OpenRouter's free-model router.
+  const model = requested === FALLBACK_MODEL || requested.endsWith(":free") ? requested : DEFAULT_MODEL;
+  const upstreamMessages = [{ role: "system", content: OWNER_PROMPT }, ...messages.filter(m => m.role !== "system")];
+  const payload = {
+    model,
+    messages: upstreamMessages,
+    stream: body.stream === true,
+    max_tokens: 1800,
+    ...(model !== FALLBACK_MODEL ? { models: [model, FALLBACK_MODEL], route: "fallback" } : {})
+  };
   try {
-    const upstream = await fetch("https://api.openai.com/v1/responses", {
+    const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
-      headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        instructions: OWNER_PROMPT,
-        input: messages,
-        stream: body.stream === true,
-        store: false,
-        max_output_tokens: 1800
-      })
+      headers: {
+        Authorization: "Bearer " + apiKey,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant.vercel.app",
+        "X-Title": "Shakil AI Assistant"
+      },
+      body: JSON.stringify(payload)
     });
     if (!upstream.ok) {
       const detail = (await upstream.text()).slice(0, 900);
-      return json(res, upstream.status, { error: "OpenAI API request failed.", detail });
+      return json(res, upstream.status, { error: "OpenRouter API request failed.", detail });
     }
     if (body.stream !== true) {
       const data = await upstream.json();
-      const text = (data.output || []).flatMap(item => item.content || []).filter(part => part.type === "output_text").map(part => part.text).join("");
-      return json(res, 200, { reply: text, id: data.id, model: data.model });
+      return json(res, 200, { reply: data.choices?.[0]?.message?.content || "", id: data.id, model: data.model || model });
     }
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
-    const reader = upstream.body.getReader();
-    const decoder = new TextDecoder();
+    const reader = upstream.body.getReader(), decoder = new TextDecoder();
     let buffer = "";
     const emit = value => res.write("data: " + JSON.stringify({ choices: [{ delta: { content: value } }] }) + "\n\n");
     try {
@@ -76,11 +91,10 @@ module.exports = async function handler(req, res) {
           if (!raw || raw === "[DONE]") continue;
           let event;
           try { event = JSON.parse(raw); } catch { continue; }
-          if (event.type === "response.output_text.delta" && typeof event.delta === "string") emit(event.delta);
-          if (event.type === "response.failed" || event.type === "error") {
-            const message = event.response?.error?.message || event.error?.message || "OpenAI response failed.";
-            emit("\n\n" + "দুঃখিত, উত্তর তৈরি করতে সমস্যা হয়েছে: " + message);
-          }
+          const delta = event.choices?.[0]?.delta?.content;
+          if (typeof delta === "string" && delta) emit(delta);
+          else if (Array.isArray(delta)) for (const part of delta) if (part.type === "text" && part.text) emit(part.text);
+          if (event.error) emit("\n\nদুঃখিত, উত্তর তৈরি করতে সমস্যা হয়েছে।");
         }
       }
     } finally {
@@ -89,8 +103,8 @@ module.exports = async function handler(req, res) {
       res.end();
     }
   } catch (err) {
-    console.error("OpenAI Responses API error:", err?.message || err);
-    if (!res.headersSent) return json(res, 502, { error: "OpenAI API-তে সংযোগ করা যায়নি। API key, model access এবং billing পরীক্ষা করো।" });
+    console.error("OpenRouter API error:", err?.message || err);
+    if (!res.headersSent) return json(res, 502, { error: "OpenRouter-এ সংযোগ করা যায়নি। API key, model availability এবং free limit পরীক্ষা করো।" });
     res.end();
   }
 };
