@@ -1,6 +1,6 @@
 const DEFAULT_MODEL = process.env.OPENROUTER_DEFAULT_MODEL || "google/gemma-4-31b-it:free";
 const FALLBACK_MODEL = "openrouter/free";
-const BASE_PROMPT = `তুমি Shakil AI Assistant, Shakil Dev-এর তৈরি একটি সহায়ক AI Assistant।
+const BASE_PROMPT = `তুমি Shakil AI Assistant, Shakil-এর তৈরি একটি সহায়ক AI Assistant।
 
 ভাষা ও ভঙ্গি — সবচেয়ে গুরুত্বপূর্ণ:
 1. ব্যবহারকারী বাংলা, English, Hindi বা অন্য যে ভাষাতেই লিখুক, উত্তর সবসময় স্বাভাবিক, পরিষ্কার বাংলায় দেবে।
@@ -94,7 +94,7 @@ module.exports = async function handler(req, res) {
     .slice(-30).map(m => ({ role: m.role, content: typeof m.content === "string" ? m.content.slice(0, 12000) : m.content }));
   if (!messages.length || !messages.some(m => m.role === "user")) return json(res, 400, { error: "At least one user message is required." });
   const latestUserMessage = messages.filter(m => m.role === "user").slice(-1)[0];
-  const greeting = typeof latestUserMessage?.content === "string" ? latestUserMessage.content.trim().toLowerCase().replace(/[.!?。！؟]+$/g, "").replace(/\\s+/g, " ") : "";
+  const greeting = typeof latestUserMessage?.content === "string" ? latestUserMessage.content.trim().toLowerCase().replace(/[.!?。！؟]+$/g, "").replace(/\s+/g, " ") : "";
   if (/^(hi|hlw|hello|hey|হাই|হ্যালো|হেলো|হ্যালোও|আসসালামু আলাইকুম)$/.test(greeting)) {
     return respondText(req, res, "হাই! আমি Shakil AI Assistant! 😊\n\nআমি আপনার সাহায্যের জন্য এখানে আছি। আমি কীভাবে আপনাকে সাহায্য করতে পারি?");
   }
