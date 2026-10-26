@@ -1,17 +1,21 @@
 const DEFAULT_MODEL = process.env.OPENROUTER_DEFAULT_MODEL || "google/gemma-4-31b-it:free";
 const FALLBACK_MODEL = "openrouter/free";
-const OWNER_PROMPT = `তুমি Shakil AI Assistant, Shakil Dev-এর তৈরি একটি সহায়ক বাংলা AI Assistant।
+const BASE_PROMPT = `তুমি Shakil AI Assistant, Shakil Dev-এর তৈরি একটি সহায়ক বাংলা AI Assistant।
 
-নিয়ম:
-1. সব সময় সহজ, স্বাভাবিক বাংলা অথবা প্রয়োজনমতো বাংলা-English mix করে উত্তর দেবে।
+সাধারণ নিয়ম:
+1. সহজ, স্বাভাবিক বাংলায় অথবা প্রয়োজনমতো বাংলা-English mix করে উত্তর দেবে।
 2. ব্যবহারকারী নিজের নাম জানতে চাইলে বলবে তার নাম Shakil।
-3. তোমাকে কে তৈরি করেছে, কে developer—জিজ্ঞেস করলে বলবে: “আমাকে Shakil Dev তৈরি করেছেন।”
-4. নিজের পরিচয় সব সময় Shakil AI Assistant হিসেবে দেবে।
-5. Hi/Hello-র মতো greeting-এ স্বাভাবিকভাবে উত্তর দেবে।
-6. প্রশ্নের উত্তর পরিষ্কার ও নির্ভুলভাবে দেওয়ার চেষ্টা করবে; না জানলে ভুল তথ্য বানাবে না।
-7. Coding প্রশ্নে কার্যকর code এবং বাংলায় ব্যাখ্যা দেবে।
-8. ছবি সংযুক্ত থাকলে ছবিতে যা দেখা যায় তা বিশ্লেষণ করবে; নিশ্চিত নও এমন কিছু অনুমান করে সত্য হিসেবে বলবে না।
-9. OpenRouter, API key বা internal configuration সম্পর্কে গোপন তথ্য প্রকাশ করবে না।`;
+3. তোমাকে কে তৈরি করেছে বা developer কে—জিজ্ঞেস করলে বলবে: “আমাকে Shakil Dev তৈরি করেছেন।”
+4. নিজের পরিচয় Shakil AI Assistant হিসেবে দেবে।
+5. প্রশ্নের উত্তর পরিষ্কার ও নির্ভুলভাবে দেবে; না জানলে ভুল তথ্য বানাবে না।
+6. Coding প্রশ্নে কার্যকর code, প্রয়োজনীয় error handling এবং বাংলায় ব্যাখ্যা দেবে।
+7. ছবি সংযুক্ত থাকলে দৃশ্যমান বিষয় বিশ্লেষণ করবে; নিশ্চিত নও এমন কিছু সত্য হিসেবে বলবে না।
+8. OpenRouter API key বা অন্য কোনো secret প্রকাশ করবে না।
+9. টুল ব্যবহার করলে শুধু অনুমোদিত calculator tool ব্যবহার করবে; arbitrary code, shell command বা বাইরের action চালাবে না।`;
+const MODE_PROMPTS = {
+  study: `\n\nStudy Assistant mode: শিক্ষকের মতো ধাপে ধাপে বোঝাবে, সহজ উদাহরণ দেবে, প্রয়োজন হলে শেষে ছোট practice question দেবে। ব্যবহারকারী স্পষ্টভাবে উত্তর চাইলে উত্তর দেবে, তবে শেখার প্রক্রিয়াও ব্যাখ্যা করবে।`,
+  chat: `\n\nAI Chat mode: সাধারণ প্রশ্ন, coding, planning এবং সমস্যা সমাধানে সহায়তা করো।`
+};
 const windows = new Map();
 function limited(ip) {
   const now = Date.now(), old = windows.get(ip);
@@ -24,6 +28,44 @@ function json(res, status, body) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
   res.end(JSON.stringify(body));
+}
+// A small arithmetic parser. No eval/Function and no access to the host environment.
+function calculate(expression) {
+  if (typeof expression !== "string" || !expression.trim() || expression.length > 160) throw new Error("expression must be 1–160 characters");
+  const tokens = expression.match(/\d+(?:\.\d+)?|[()+\-*/%^]/g) || [];
+  if (tokens.join("") !== expression.replace(/\s+/g, "")) throw new Error("Only numbers and + - * / % ^ parentheses are supported");
+  let i = 0;
+  function atom() {
+    const t = tokens[i++];
+    if (t === "+" || t === "-") { const n = atom(); return t === "-" ? -n : n; }
+    if (t === "(") { const n = sum(); if (tokens[i++] !== ")") throw new Error("Missing closing parenthesis"); return n; }
+    const n = Number(t);
+    if (!t || !Number.isFinite(n)) throw new Error("Expected a number");
+    return n;
+  }
+  function power() { let n = atom(); if (tokens[i] === "^") { i++; n = Math.pow(n, power()); } return n; }
+  function product() {
+    let n = power();
+    while (["*", "/", "%"].includes(tokens[i])) {
+      const op = tokens[i++], b = power();
+      if ((op === "/" || op === "%") && b === 0) throw new Error("Cannot divide by zero");
+      n = op === "*" ? n * b : op === "/" ? n / b : n % b;
+    }
+    return n;
+  }
+  function sum() {
+    let n = product();
+    while (tokens[i] === "+" || tokens[i] === "-") { const op = tokens[i++], b = product(); n = op === "+" ? n + b : n - b; }
+    return n;
+  }
+  const result = sum();
+  if (i !== tokens.length || !Number.isFinite(result)) throw new Error("Invalid or out-of-range expression");
+  return String(Number(result.toPrecision(12)));
+}
+function executeTool(name, args) {
+  if (name !== "calculator") return JSON.stringify({ error: "Tool not permitted" });
+  try { return JSON.stringify({ result: calculate(args.expression) }); }
+  catch (e) { return JSON.stringify({ error: e.message || "Invalid expression" }); }
 }
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -41,70 +83,93 @@ module.exports = async function handler(req, res) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return json(res, 503, { error: "Vercel-এ OPENROUTER_API_KEY Environment Variable যোগ করতে হবে।" });
   const requested = typeof body.model === "string" ? body.model : DEFAULT_MODEL;
-  // Only allow free model IDs, plus OpenRouter's free-model router.
   const model = requested === FALLBACK_MODEL || requested.endsWith(":free") ? requested : DEFAULT_MODEL;
-  const upstreamMessages = [{ role: "system", content: OWNER_PROMPT }, ...messages.filter(m => m.role !== "system")];
-  const payload = {
-    model,
-    messages: upstreamMessages,
-    stream: body.stream === true,
-    max_tokens: 1800,
-    ...(model !== FALLBACK_MODEL ? { models: [model, FALLBACK_MODEL], route: "fallback" } : {})
-  };
+  const mode = body.mode === "study" ? "study" : "chat";
+  const upstreamMessages = [{ role: "system", content: BASE_PROMPT + MODE_PROMPTS[mode] }, ...messages.filter(m => m.role !== "system")];
+  const tools = [{
+    type: "function",
+    function: {
+      name: "calculator",
+      description: "Calculate a basic arithmetic expression accurately. Use for arithmetic instead of mental calculation.",
+      parameters: {
+        type: "object",
+        properties: { expression: { type: "string", description: "Arithmetic expression using numbers, parentheses, +, -, *, /, %, and ^, for example (12+8)*3" } },
+        required: ["expression"],
+        additionalProperties: false
+      }
+    }
+  }];
   try {
-    const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + apiKey,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant.vercel.app",
-        "X-Title": "Shakil AI Assistant"
-      },
-      body: JSON.stringify(payload)
-    });
-    if (!upstream.ok) {
-      const detail = (await upstream.text()).slice(0, 900);
-      return json(res, upstream.status, { error: "OpenRouter API request failed.", detail });
+    let conversation = upstreamMessages;
+    let data = null;
+    let activeModel = model;
+    // Allow a maximum of three safe calculator tool calls per request.
+    for (let turn = 0; turn < 4; turn++) {
+      const payload = {
+        model: activeModel,
+        messages: conversation,
+        stream: false,
+        max_tokens: 1800,
+        tools,
+        tool_choice: "auto",
+        ...(activeModel !== FALLBACK_MODEL ? { models: [activeModel, FALLBACK_MODEL], route: "fallback" } : {})
+      };
+      let upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + apiKey,
+          "Content-Type": "application/json",
+          "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app",
+          "X-Title": "Shakil AI Assistant"
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!upstream.ok) {
+        const detail = (await upstream.text()).slice(0, 900);
+        // Some free models do not support function calling. Retry without tools.
+        if (turn === 0 && (upstream.status === 400 || upstream.status === 422)) {
+          const retryPayload = { ...payload, messages: upstreamMessages };
+          delete retryPayload.tools; delete retryPayload.tool_choice;
+          upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json", "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app", "X-Title": "Shakil AI Assistant" },
+            body: JSON.stringify(retryPayload)
+          });
+          if (!upstream.ok) return json(res, upstream.status, { error: "OpenRouter API request failed.", detail: (await upstream.text()).slice(0, 900) });
+          data = await upstream.json();
+          break;
+        }
+        return json(res, upstream.status, { error: "OpenRouter API request failed.", detail });
+      }
+      data = await upstream.json();
+      const message = data.choices?.[0]?.message;
+      const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+      if (!calls.length || turn === 3) break;
+      conversation = [...conversation, { role: "assistant", content: message.content || null, tool_calls: calls }];
+      for (const call of calls) {
+        let args = {};
+        try { args = JSON.parse(call.function?.arguments || "{}"); } catch {}
+        const result = executeTool(call.function?.name, args);
+        conversation.push({ role: "tool", tool_call_id: call.id, content: result });
+      }
     }
-    if (body.stream !== true) {
-      const data = await upstream.json();
-      return json(res, 200, { reply: data.choices?.[0]?.message?.content || "", id: data.id, model: data.model || model });
-    }
+    const answer = data?.choices?.[0]?.message?.content;
+    if (typeof answer !== "string" || !answer.trim()) return json(res, 502, { error: "মডেল কোনো text উত্তর দেয়নি। অন্য free model নির্বাচন করে আবার চেষ্টা করো।" });
+    if (body.stream !== true) return json(res, 200, { reply: answer, id: data.id, model: data.model || model });
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
-    const reader = upstream.body.getReader(), decoder = new TextDecoder();
-    let buffer = "";
-    const emit = value => res.write("data: " + JSON.stringify({ choices: [{ delta: { content: value } }] }) + "\n\n");
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.startsWith("data:")) continue;
-          const raw = line.slice(5).trim();
-          if (!raw || raw === "[DONE]") continue;
-          let event;
-          try { event = JSON.parse(raw); } catch { continue; }
-          const delta = event.choices?.[0]?.delta?.content;
-          if (typeof delta === "string" && delta) emit(delta);
-          else if (Array.isArray(delta)) for (const part of delta) if (part.type === "text" && part.text) emit(part.text);
-          if (event.error) emit("\n\nদুঃখিত, উত্তর তৈরি করতে সমস্যা হয়েছে।");
-        }
-      }
-    } finally {
-      try { reader.releaseLock(); } catch {}
-      res.write("data: [DONE]\n\n");
-      res.end();
+    // Send the completed answer as short SSE chunks for the existing streaming UI.
+    for (let i = 0; i < answer.length; i += 32) {
+      res.write("data: " + JSON.stringify({ choices: [{ delta: { content: answer.slice(i, i + 32) } }] }) + "\n\n");
     }
+    res.write("data: [DONE]\n\n");
+    return res.end();
   } catch (err) {
     console.error("OpenRouter API error:", err?.message || err);
     if (!res.headersSent) return json(res, 502, { error: "OpenRouter-এ সংযোগ করা যায়নি। API key, model availability এবং free limit পরীক্ষা করো।" });
-    res.end();
+    return res.end();
   }
 };
