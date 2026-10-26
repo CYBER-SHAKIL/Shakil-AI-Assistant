@@ -12,7 +12,7 @@ module.exports = async function handler(req, res) {
     const models = (data.data || []).filter(m => m.id === "openrouter/free" || (m.id.endsWith(":free") && Number(m.pricing?.prompt || 0) === 0 && Number(m.pricing?.completion || 0) === 0))
       .map(m => ({ id: m.id, name: m.name || m.id, vision: (m.architecture?.input_modalities || []).includes("image"), contextLength: m.context_length || null }))
       .sort((a, b) => a.id === "google/gemma-4-31b-it:free" ? -1 : b.id === "google/gemma-4-31b-it:free" ? 1 : a.id.localeCompare(b.id));
-    if (!models.some(m => m.id === "openrouter/free")) models.push({ id: "openrouter/free", name: "OpenRouter Free Router", vision: false, contextLength: null });
+    if (!models.some(m => m.id === "openrouter/free")) models.push({ id: "openrouter/free", name: "OpenRouter Free Router", vision: true, contextLength: null });
     res.statusCode = 200; res.end(JSON.stringify({ models }));
   } catch (error) {
     console.error("OpenRouter models error:", error?.message || error);
