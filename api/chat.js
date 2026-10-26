@@ -9,12 +9,12 @@ const BASE_PROMPT = `তুমি Shakil AI Assistant, Shakil-এর তৈর�
 4. শুধু ব্যবহারকারী “hi”, “hello”, “হাই”, “হ্যালো”, “হেলো”, “আসসালামু আলাইকুম” বা অনুরূপ ছোট greeting দিলে উত্তর হবে: “হাই! আমি Shakil AI Assistant! 😊\n\nআমি আপনার সাহায্যের জন্য এখানে আছি। আমি কীভাবে আপনাকে সাহায্য করতে পারি?”
 5. greeting ছাড়া অন্য কোনো প্রশ্নে সরাসরি প্রশ্নের উত্তর দেবে; পরিচয়, নাম বা স্বাগত বাক্য অযথা যোগ করবে না।
 6. কখনো “আপনি Shakil বলেছেন, তাই...” বা এ ধরনের বানানো/অপ্রাসঙ্গিক বাক্য বলবে না।
-7. ব্যবহারকারী সরাসরি নিজের নাম জানতে চাইলে বলবে “Shakil”; developer/creator জানতে চাইলে বলবে “Shakil Dev”।
+7. ব্যবহারকারী সরাসরি নিজের নাম জানতে চাইলে বলবে “Shakil”; developer/creator জানতে চাইলে বলবে “Shakil”।
 8. উত্তর সুন্দরভাবে সাজাবে; দরকারে ছোট heading, bullet বা code block ব্যবহার করবে। অপ্রয়োজনীয় পুনরাবৃত্তি, লম্বা ভূমিকা এবং অসংলগ্ন কথা এড়াবে।
 9. তথ্য সঠিক রাখবে; নিশ্চিত না হলে অনুমানকে সত্য হিসেবে বলবে না।
 10. Coding প্রশ্নে কার্যকর code ও বাংলায় ব্যাখ্যা দেবে। পড়াশোনা/গণিতের প্রশ্নে ধাপে ধাপে বোঝাবে। ছবি সংযুক্ত থাকলে দৃশ্যমান বিষয় বিশ্লেষণ করবে।
 11. OpenRouter API key বা অন্য কোনো secret প্রকাশ করবে না।
-12. কেবল অনুমোদিত calculator tool ব্যবহার করবে; arbitrary code, shell command বা বাইরের action চালাবে না.`;
+12. কেবল অনুমোদিত calculator tool ব্যবহার করবে; arbitrary code, shell command বা বাইরের action চালাবে না.\n13. তুমি সাধারণ প্রশ্ন, coding, পড়াশোনা, গণিত, সংযুক্ত ছবি বোঝা এবং অনুরোধ অনুযায়ী code file তৈরি করতে সাহায্য করতে পারো। Code block-এ Copy ও Download সুবিধা আছে; HTML code block-এ sandboxed Live preview থাকে। কথোপকথন Print থেকে PDF হিসেবে save করা যায়। কোনো কোড সত্যিকারের run/test করা হয়েছে বলে দাবি করবে না যদি না Live preview-তে ব্যবহারকারী নিজে চালায়।`;
 // Mode selection is removed; infer the task from each user message.
 const windows = new Map();
 function limited(ip) {
@@ -97,6 +97,34 @@ function calculate(expression) {
   if (i !== tokens.length || !Number.isFinite(result)) throw new Error("Invalid or out-of-range expression");
   return String(Number(result.toPrecision(12)));
 }
+let autoModelCache = { at: 0, models: [] };
+async function chooseAutoModel(messages) {
+  try {
+    if (Date.now() - autoModelCache.at > 300000 || !autoModelCache.models.length) {
+      const response = await fetch("https://openrouter.ai/api/v1/models", { headers: { Authorization: "Bearer " + process.env.OPENROUTER_API_KEY, "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app", "X-Title": "Shakil AI Assistant" } });
+      if (!response.ok) return FALLBACK_MODEL;
+      const data = await response.json();
+      autoModelCache.models = (data.data || []).filter(m => m.id?.endsWith(":free") && Number(m.pricing?.prompt || 0) === 0 && Number(m.pricing?.completion || 0) === 0);
+      autoModelCache.at = Date.now();
+    }
+    const latest = [...messages].reverse().find(m => m.role === "user");
+    const content = latest?.content;
+    const hasImage = Array.isArray(content) && content.some(part => part?.type === "image_url" || part?.image_url);
+    const text = typeof content === "string" ? content : Array.isArray(content) ? content.filter(p => p?.type === "text").map(p => p.text || "").join(" ") : "";
+    const coding = /\b(code|coding|program|debug|bug|html|css|javascript|typescript|python|java|react|api|script|compile|function|কোড|প্রোগ্রাম|ওয়েবসাইট|ওয়েবসাইট|বাগ|ডিবাগ)\b/i.test(text);
+    const reasoning = /\b(math|mathematics|solve|equation|proof|reason|physics|chemistry|biology|homework|study|explain|calculate|গণিত|সমীকরণ|সমাধান|পড়াশোনা|পড়াশোনা|ব্যাখ্যা|হিসাব|বিজ্ঞান)\b/i.test(text);
+    const score = model => {
+      const id = String(model.id || "").toLowerCase();
+      const vision = (model.architecture?.input_modalities || []).includes("image");
+      if (hasImage) return vision ? 100 : -1000;
+      if (coding) return /coder|codestral|starcoder|devstral/.test(id) ? 90 : /qwen|deepseek|gemma/.test(id) ? 35 : 0;
+      if (reasoning) return /deepseek-r1|qwq|reason|qwen3|gemma-4/.test(id) ? 75 : /llama|mistral/.test(id) ? 20 : 0;
+      return /gemma-4|qwen3|llama-4|mistral-small/.test(id) ? 55 : /qwen|gemma|llama/.test(id) ? 30 : 0;
+    };
+    const best = autoModelCache.models.map(model => ({ model, score: score(model) })).filter(x => x.score > 0).sort((a,b) => b.score-a.score)[0];
+    return best?.model?.id || FALLBACK_MODEL;
+  } catch { return FALLBACK_MODEL; }
+}
 function executeTool(name, args) {
   if (name !== "calculator") return JSON.stringify({ error: "Tool not permitted" });
   try { return JSON.stringify({ result: calculate(args.expression) }); }
@@ -125,7 +153,7 @@ module.exports = async function handler(req, res) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return json(res, 503, { error: "Vercel-এ OPENROUTER_API_KEY Environment Variable যোগ করতে হবে।" });
   const requested = typeof body.model === "string" ? body.model : DEFAULT_MODEL;
-  const model = requested === FALLBACK_MODEL || requested.endsWith(":free") ? requested : DEFAULT_MODEL;
+  const model = requested === FALLBACK_MODEL ? await chooseAutoModel(messages) : (requested.endsWith(":free") ? requested : DEFAULT_MODEL);
   const upstreamMessages = [{ role: "system", content: BASE_PROMPT }, ...messages.filter(m => m.role !== "system")];
   const tools = [{
     type: "function",
