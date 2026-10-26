@@ -29,6 +29,19 @@ function json(res, status, body) {
   res.setHeader("Cache-Control", "no-store");
   res.end(JSON.stringify(body));
 }
+function respondText(req, res, text) {
+  if (req.body?.stream !== true) return json(res, 200, { reply: text, model: "greeting" });
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  for (let i = 0; i < text.length; i += 32) {
+    res.write("data: " + JSON.stringify({ choices: [{ delta: { content: text.slice(i, i + 32) } }] }) + "\n\n");
+  }
+  res.write("data: [DONE]\n\n");
+  return res.end();
+}
 // A small arithmetic parser. No eval/Function and no access to the host environment.
 function calculate(expression) {
   if (typeof expression !== "string" || !expression.trim() || expression.length > 160) throw new Error("expression must be 1–160 characters");
@@ -80,6 +93,11 @@ module.exports = async function handler(req, res) {
     .filter(m => m && ["user", "assistant", "system"].includes(m.role) && (typeof m.content === "string" || Array.isArray(m.content)))
     .slice(-30).map(m => ({ role: m.role, content: typeof m.content === "string" ? m.content.slice(0, 12000) : m.content }));
   if (!messages.length || !messages.some(m => m.role === "user")) return json(res, 400, { error: "At least one user message is required." });
+  const latestUserMessage = messages.filter(m => m.role === "user").slice(-1)[0];
+  const greeting = typeof latestUserMessage?.content === "string" ? latestUserMessage.content.trim().toLowerCase().replace(/[.!?。！؟]+$/g, "").replace(/\\s+/g, " ") : "";
+  if (/^(hi|hlw|hello|hey|হাই|হ্যালো|হেলো|হ্যালোও|আসসালামু আলাইকুম)$/.test(greeting)) {
+    return respondText(req, res, "হাই! আমি Shakil AI Assistant! 😊\n\nআমি আপনার সাহায্যের জন্য এখানে আছি। আমি কীভাবে আপনাকে সাহায্য করতে পারি?");
+  }
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return json(res, 503, { error: "Vercel-এ OPENROUTER_API_KEY Environment Variable যোগ করতে হবে।" });
   const requested = typeof body.model === "string" ? body.model : DEFAULT_MODEL;
