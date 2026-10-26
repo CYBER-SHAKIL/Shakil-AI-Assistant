@@ -23,6 +23,28 @@ function limited(ip) {
   old.count++;
   return old.count > 20;
 }
+async function verifyShakilApiKey(key) {
+  if (typeof key !== "string" || !key.startsWith("sk-shakil-")) return false;
+  let account;
+  try { account = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "{}"); } catch {}
+  const dbUrl = String(process.env.FIREBASE_DATABASE_URL || "").replace(/\/$/, "");
+  if (!account?.client_email || !account?.private_key || !dbUrl) return false;
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const b64 = v => Buffer.from(v).toString("base64url");
+    const unsigned = b64(JSON.stringify({alg:"RS256",typ:"JWT"}))+"."+b64(JSON.stringify({iss:account.client_email,scope:"https://www.googleapis.com/auth/firebase.database https://www.googleapis.com/auth/userinfo.email",aud:account.token_uri||"https://oauth2.googleapis.com/token",iat:now,exp:now+3600}));
+    const signer = require("node:crypto").createSign("RSA-SHA256"); signer.update(unsigned); signer.end();
+    const assertion = unsigned+"."+signer.sign(account.private_key,"base64url");
+    const tokenResponse = await fetch(account.token_uri||"https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"urn:ietf:params:oauth:grant-type:jwt-bearer",assertion})});
+    const tokenData = await tokenResponse.json();
+    if (!tokenResponse.ok || !tokenData.access_token) return false;
+    const hash = require("node:crypto").createHash("sha256").update(key).digest("hex");
+    const response = await fetch(dbUrl+"/shakilApiKeys/"+hash+".json",{headers:{Authorization:"Bearer "+tokenData.access_token}});
+    if (!response.ok) return false;
+    const record = await response.json();
+    return !!record && record.revoked !== true;
+  } catch { return false; }
+}
 function json(res, status, body) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -98,6 +120,8 @@ module.exports = async function handler(req, res) {
   if (/^(hi|hlw|hello|hey|হাই|হ্যালো|হেলো|হ্যালোও|আসসালামু আলাইকুম)$/.test(greeting)) {
     return respondText(req, res, "হাই! আমি Shakil AI Assistant! 😊\n\nআমি আপনার সাহায্যের জন্য এখানে আছি। আমি কীভাবে আপনাকে সাহায্য করতে পারি?");
   }
+  const externalKey = req.headers["x-shakil-api-key"] || (String(req.headers.authorization || "").startsWith("Bearer sk-shakil-") ? String(req.headers.authorization).slice(7) : "");
+  if (externalKey && !(await verifyShakilApiKey(externalKey))) return json(res, 401, { error: "Invalid or revoked Shakil API key." });
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return json(res, 503, { error: "Vercel-এ OPENROUTER_API_KEY Environment Variable যোগ করতে হবে।" });
   const requested = typeof body.model === "string" ? body.model : DEFAULT_MODEL;
