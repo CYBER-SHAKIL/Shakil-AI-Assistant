@@ -49,3 +49,15 @@ The current `POST /api/generate-image` endpoint still uses an OpenAI image-gener
 - The current rate limiter is in-memory and does not persist across Vercel serverless instances.
 - Public endpoints can be abused; monitor OpenRouter usage and limits.
 - Free model availability, vision support, context limits, and routing behavior may change.
+
+## 5. Assistant modes and safe tool calling
+
+- **Chat mode:** Bengali-first conversation and coding help.
+- **Study mode:** step-by-step explanations and examples, selected from the Study chip beside the composer.
+- **Image understanding:** attach an image and select a free model marked “Image input”; `openrouter/free` can route to a model supporting image input.
+- **Tool calling:** the chat backend exposes a limited arithmetic calculator function. It parses basic arithmetic directly and does not run arbitrary JavaScript, shell commands, or external actions. If a selected model does not support function calling, the backend retries the request without tools.
+- **Send button:** green 3D-style button with pressed-state feedback.
+
+## 6. Verification notes
+
+The latest repository inline JavaScript and the `api/chat.js` and `api/models.js` server files passed JavaScript syntax checks. This is a syntax check, not an end-to-end API test. Live chat and model discovery still require `OPENROUTER_API_KEY` to be set in Vercel.
