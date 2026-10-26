@@ -111,8 +111,8 @@ async function chooseAutoModel(messages) {
     const content = latest?.content;
     const hasImage = Array.isArray(content) && content.some(part => part?.type === "image_url" || part?.image_url);
     const text = typeof content === "string" ? content : Array.isArray(content) ? content.filter(p => p?.type === "text").map(p => p.text || "").join(" ") : "";
-    const coding = /\b(code|coding|program|debug|bug|html|css|javascript|typescript|python|java|react|api|script|compile|function|কোড|প্রোগ্রাম|ওয়েবসাইট|ওয়েবসাইট|বাগ|ডিবাগ)\b/i.test(text);
-    const reasoning = /\b(math|mathematics|solve|equation|proof|reason|physics|chemistry|biology|homework|study|explain|calculate|গণিত|সমীকরণ|সমাধান|পড়াশোনা|পড়াশোনা|ব্যাখ্যা|হিসাব|বিজ্ঞান)\b/i.test(text);
+    const coding = /(?:\b(code|coding|program|debug|bug|html|css|javascript|typescript|python|java|react|api|script|compile|function)\b|কোড|প্রোগ্রাম|ওয়েবসাইট|ওয়েবসাইট|বাগ|ডিবাগ)/i.test(text);
+    const reasoning = /(?:\b(math|mathematics|solve|equation|proof|reason|physics|chemistry|biology|homework|study|explain|calculate)\b|গণিত|সমীকরণ|সমাধান|পড়াশোনা|পড়াশোনা|ব্যাখ্যা|হিসাব|বিজ্ঞান)/i.test(text);
     const score = model => {
       const id = String(model.id || "").toLowerCase();
       const vision = (model.architecture?.input_modalities || []).includes("image");
