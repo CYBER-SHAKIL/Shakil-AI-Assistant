@@ -61,3 +61,28 @@ The current `POST /api/generate-image` endpoint still uses an OpenAI image-gener
 ## 6. Verification notes
 
 The latest repository inline JavaScript and the `api/chat.js` and `api/models.js` server files passed JavaScript syntax checks. This is a syntax check, not an end-to-end API test. Live chat and model discovery still require `OPENROUTER_API_KEY` to be set in Vercel.
+
+
+## Firebase-backed project API keys
+
+The Settings panel includes a project API key manager. It is intentionally disabled until these server-only Vercel environment variables are configured:
+
+- `FIREBASE_SERVICE_ACCOUNT_JSON`: the **newly rotated** Firebase service-account JSON, pasted as one JSON value in Vercel only.
+- `FIREBASE_DATABASE_URL`: `https://shakil-dev-pro-default-rtdb.asia-southeast1.firebasedatabase.app`
+- `API_KEY_ADMIN_SECRET`: a long, random admin secret used only to create, list, and revoke project API keys.
+- `OPENROUTER_API_KEY`: the server-side OpenRouter key already required for chat.
+
+**Important:** the service-account private key shared in chat is compromised. Revoke it in Google Cloud Console and create a new key before setting `FIREBASE_SERVICE_ACCOUNT_JSON`. Never put the service-account JSON or admin secret in this repository or the browser. The public Firebase web config is not a replacement for the service-account credential.
+
+In Settings, enter the admin secret and create a project key. The raw key is shown only once; copy it securely. The database stores a SHA-256 hash and metadata, not the raw key. Revoke a key in Settings to disable it.
+
+External project requests use the same chat endpoint:
+
+```bash
+curl https://shakil-ai-assistant-lime.vercel.app/api/chat \
+  -H "Content-Type: application/json" \
+  -H "x-shakil-api-key: sk-shakil-YOUR_KEY" \
+  -d '{"model":"openrouter/free","stream":false,"messages":[{"role":"user","content":"বাংলায় একটি HTML উদাহরণ দাও"}]}'
+```
+
+The response is JSON when `stream` is false. Set `stream` to true for server-sent events. Keep project keys on the server side of your own apps; do not ship them in public browser JavaScript.
