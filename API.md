@@ -8,7 +8,7 @@ Required:
 - `OPENAI_API_KEY`: a fresh OpenAI API key stored only in Vercel Environment Variables.
 
 Optional:
-- `OPENAI_CHAT_MODEL=gpt-6-luna`
+- `OPENAI_CHAT_MODEL=gpt-6.1-sol`
 - `OPENAI_IMAGE_MODEL=gpt-image-2.5-flare`
 
 After changing environment variables, redeploy the project. Never commit secrets to GitHub. Revoke keys exposed in chats or source code.
@@ -19,7 +19,7 @@ After changing environment variables, redeploy the project. Never commit secrets
 
 ```json
 {
-  "model": "gpt-6-luna",
+  "model": "gpt-6.1-sol",
   "stream": false,
   "messages": [
     { "role": "user", "content": "তোমার নির্মাতা কে?" }
