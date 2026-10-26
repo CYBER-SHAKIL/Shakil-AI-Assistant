@@ -85,4 +85,4 @@ curl https://shakil-ai-assistant-lime.vercel.app/api/chat \
   -d '{"model":"openrouter/free","stream":false,"messages":[{"role":"user","content":"বাংলায় একটি HTML উদাহরণ দাও"}]}'
 ```
 
-The response is JSON when `stream` is false. Set `stream` to true for server-sent events. Keep project keys on the server side of your own apps; do not ship them in public browser JavaScript.
+The response is JSON when `stream` is false. Set `stream` to true for server-sent events. For image generation, POST to `/api/generate-image` with `x-shakil-api-key` and JSON like `{"prompt":"A sunset over a river","model":"gpt-image-2.5-flare"}`. Keep project keys on the server side of your own apps; do not ship them in public browser JavaScript.
