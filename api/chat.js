@@ -149,6 +149,10 @@ module.exports = async function handler(req, res) {
     return respondText(req, res, "হাই! আমি Shakil AI Assistant! 😊\n\nআমি আপনার সাহায্যের জন্য এখানে আছি। আমি কীভাবে আপনাকে সাহায্য করতে পারি?");
   }
   const externalKey = req.headers["x-shakil-api-key"] || (String(req.headers.authorization || "").startsWith("Bearer sk-shakil-") ? String(req.headers.authorization).slice(7) : "");
+  const origin = String(req.headers.origin || "");
+  let isOwnWebsite = false;
+  try { const host = new URL(origin).host; const appHost = new URL(process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app").host; isOwnWebsite = host === appHost || host === "shakil-ai-assistant-lime.vercel.app" || host === "shakil-ai-assistant.vercel.app"; } catch {}
+  if (!isOwnWebsite && !externalKey) return json(res, 401, { error: "A Shakil API key is required for external project requests." });
   if (externalKey && !(await verifyShakilApiKey(externalKey))) return json(res, 401, { error: "Invalid or revoked Shakil API key." });
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return json(res, 503, { error: "Vercel-এ OPENROUTER_API_KEY Environment Variable যোগ করতে হবে।" });
