@@ -70,12 +70,12 @@ Use an explicit command such as `/image বাংলার নদীর ধা�
 - **Chat mode:** Bengali-first conversation and coding help.
 - **Automatic task detection:** the assistant infers whether a request needs coding help, study explanations, image understanding, or web search; there are no separate mode buttons.
 - **Image understanding:** attach an image and select a free model marked “Image input”; `openrouter/free` can route to a model supporting image input.
-- **Tool calling:** the chat backend exposes a limited arithmetic calculator and optional Tavily `web_search` function. It parses basic arithmetic directly and does not run arbitrary JavaScript, shell commands, or external actions. If a selected model does not support function calling, the backend retries the request without tools.
+- **Tool calling:** the chat backend exposes a limited arithmetic calculator and optional Tavily `web_search` function. It parses basic arithmetic directly and does not run arbitrary JavaScript, shell commands, or external actions. If a model rejects a tool schema with a compatible 400/422 error, the backend retries that model once without tools.
 - **Send button:** green 3D-style button with pressed-state feedback.
 
 ## 6. Verification notes
 
-Syntax checks do not replace end-to-end tests. Live chat and model discovery require `OPENROUTER_API_KEY` in Vercel.
+Syntax checks do not replace end-to-end tests. Live chat and model discovery require `OPENROUTER_API_KEY` in Vercel. The UI and server default model are both `google/gemma-4-31b-it:free`; the Settings list includes the default once and offers `openrouter/free` for automatic free-model routing.
 
 
 ## Firebase-backed project API keys
