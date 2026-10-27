@@ -20,7 +20,9 @@ Configure these in Vercel → Project → Settings → Environment Variables, th
 
 Required for chat:
 - `OPENROUTER_API_KEY` — server-side OpenRouter key.
-- `TAVILY_API_KEY` — optional server-side Tavily key for live web search.
+
+Optional for live web search:
+- `TAVILY_API_KEY` — server-side Tavily key. Without it, ordinary chat continues but live search is unavailable.
 - `WEB_SEARCH_DAILY_GLOBAL_LIMIT=1000` — optional total daily web search cap across the deployment (requires Upstash Redis for a shared persistent cap).
 
 Required for image generation:
