@@ -187,6 +187,104 @@ module.exports = async function handler(req, res) {
       }
     }
   }];
+
+  let clientDisconnected = false;
+  let activeController = null;
+  res.on("close", () => {
+    if (!res.writableEnded) {
+      clientDisconnected = true;
+      if (activeController) activeController.abort();
+    }
+  });
+
+  async function streamModel(candidate, candidateMessages, offerTools, onText) {
+    const controller = new AbortController();
+    activeController = controller;
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 23000);
+    const payload = {
+      model: candidate,
+      messages: candidateMessages,
+      stream: true,
+      max_tokens: 1800,
+      ...(offerTools ? { tools, tool_choice: "auto" } : {})
+    };
+    let text = "";
+    const calls = new Map();
+    let finishReason = "";
+    try {
+      const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + apiKey,
+          "Content-Type": "application/json",
+          "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app",
+          "X-Title": "Shakil AI Assistant"
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      if (!upstream.ok) {
+        const detail = (await upstream.text().catch(() => "")).slice(0, 300);
+        const error = new Error("মডেল " + candidate + " অনুরোধটি সম্পন্ন করতে পারেনি (" + upstream.status + ").");
+        error.status = upstream.status;
+        error.detail = detail;
+        throw error;
+      }
+      if (!upstream.body) throw new Error("OpenRouter streaming response body is unavailable.");
+      const reader = upstream.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      function consumeLine(line) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) return;
+        const data = trimmed.slice(5).trim();
+        if (!data || data === "[DONE]") return;
+        let event;
+        try { event = JSON.parse(data); } catch { return; }
+        if (event.error) throw new Error(String(event.error.message || "OpenRouter stream error"));
+        const choice = event.choices?.[0];
+        if (!choice) return;
+        const delta = choice.delta || {};
+        if (typeof delta.content === "string" && delta.content) {
+          text += delta.content;
+          onText(delta.content);
+        }
+        if (Array.isArray(delta.tool_calls)) {
+          for (const part of delta.tool_calls) {
+            const index = Number.isInteger(part.index) ? part.index : calls.size;
+            const current = calls.get(index) || { id: "", type: "function", function: { name: "", arguments: "" } };
+            if (part.id) current.id = part.id;
+            if (part.type) current.type = part.type;
+            if (part.function?.name) current.function.name += part.function.name;
+            if (typeof part.function?.arguments === "string") current.function.arguments += part.function.arguments;
+            calls.set(index, current);
+          }
+        }
+        if (choice.finish_reason) finishReason = choice.finish_reason;
+      }
+      while (true) {
+        if (clientDisconnected) throw new Error("Client disconnected.");
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) consumeLine(line);
+      }
+      if (buffer.trim()) consumeLine(buffer);
+      if (timedOut) throw new Error("OpenRouter request timed out after 23 seconds.");
+      return { text, toolCalls: [...calls.values()].filter(c => c.function.name), finishReason };
+    } catch (error) {
+      if (clientDisconnected) throw error;
+      if (timedOut) throw new Error("AI model timed out after 23 seconds.");
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      if (activeController === controller) activeController = null;
+    }
+  }
+
   try {
     const candidates = [...new Set([
       model,
@@ -194,102 +292,113 @@ module.exports = async function handler(req, res) {
       "google/gemma-4-26b-a4b-it:free",
       "google/gemma-4-31b-it:free",
       "openrouter/free"
-    ])];
+    ])].slice(0, 3);
     let lastFailure = null;
-    let finalData = null;
-    let activeModel = model;
+    let chosenModel = "";
+    let streamed = false;
+    let streamStarted = false;
+    let responseText = "";
+    let responseHeaders = false;
+    const sendText = chunk => {
+      responseText += chunk;
+      if (body.stream !== true) return;
+      if (!responseHeaders) {
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+        res.setHeader("Cache-Control", "no-cache, no-transform");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
+        responseHeaders = true;
+      }
+      res.write("data: " + JSON.stringify({ choices: [{ delta: { content: chunk } }] }) + "\n\n");
+      streamStarted = true;
+    };
 
-    // Try each distinct free model in sequence. Empty responses, unsupported tool
-    // calling, provider errors, and transient failures all trigger a fallback.
     for (const candidate of candidates) {
-      activeModel = candidate;
-      let candidateMessages = upstreamMessages;
-      let candidateData = null;
-      let candidateSucceeded = false;
-
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const payload = {
-          model: candidate,
-          messages: candidateMessages,
-          stream: false,
-          max_tokens: 1800,
-          ...(attempt === 0 ? { tools, tool_choice: "auto" } : {})
-        };
-        let upstream;
-        try {
-          upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              Authorization: "Bearer " + apiKey,
-              "Content-Type": "application/json",
-              "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app",
-              "X-Title": "Shakil AI Assistant"
-            },
-            body: JSON.stringify(payload)
-          });
-        } catch (e) {
-          lastFailure = "OpenRouter-এ সংযোগ করা যায়নি।";
-          break;
-        }
-
-        if (!upstream.ok) {
-          lastFailure = "মডেল " + candidate + " অনুরোধটি সম্পন্ন করতে পারেনি (" + upstream.status + ").";
-          // Some free models do not support function calling. Retry this model without tools.
-          if (attempt === 0 && (upstream.status === 400 || upstream.status === 422)) continue;
-          break;
-        }
-
-        try { candidateData = await upstream.json(); }
-        catch { lastFailure = "মডেল থেকে সঠিক JSON উত্তর পাওয়া যায়নি।"; break; }
-
-        const candidateMessage = candidateData?.choices?.[0]?.message;
-        const candidateCalls = Array.isArray(candidateMessage?.tool_calls) ? candidateMessage.tool_calls : [];
-        if (candidateCalls.length && attempt === 0) {
-          let toolConversation = [...upstreamMessages, { role: "assistant", content: candidateMessage.content || null, tool_calls: candidateCalls }];
-          for (const call of candidateCalls.slice(0, 3)) {
-            let args = {};
-            try { args = JSON.parse(call.function?.arguments || "{}"); } catch {}
-            toolConversation.push({ role: "tool", tool_call_id: call.id, content: executeTool(call.function?.name, args) });
+      if (clientDisconnected) return;
+      chosenModel = candidate;
+      responseText = "";
+      let firstResult;
+      try {
+        firstResult = await streamModel(candidate, upstreamMessages, true, chunk => {
+          streamed = true;
+          sendText(chunk);
+        });
+      } catch (error) {
+        if (clientDisconnected) return;
+        lastFailure = error.message || "AI model request failed.";
+        // Once response text has reached the client, do not switch models or append a second answer.
+        if (streamStarted) {
+          if (!res.writableEnded) {
+            res.write("data: " + JSON.stringify({ error: { message: "উত্তর মাঝপথে থেমে গেছে। আবার চেষ্টা করো।" } }) + "\n\n");
+            res.end();
           }
-          candidateMessages = toolConversation;
-          // Make one follow-up call with tool results, without offering additional tools.
-          continue;
+          return;
         }
-
-        const answer = candidateMessage?.content;
-        if (typeof answer === "string" && answer.trim()) {
-          finalData = candidateData;
-          candidateSucceeded = true;
-          break;
-        }
-        lastFailure = "মডেল কোনো text উত্তর দেয়নি; অন্য ফ্রি মডেল চেষ্টা করা হচ্ছে।";
-        break;
+        continue;
       }
 
-      if (candidateSucceeded) break;
+      if (firstResult.toolCalls.length && !firstResult.text) {
+        const toolMessages = [
+          ...upstreamMessages,
+          { role: "assistant", content: null, tool_calls: firstResult.toolCalls.slice(0, 3) }
+        ];
+        for (const call of firstResult.toolCalls.slice(0, 3)) {
+          let args = {};
+          try { args = JSON.parse(call.function.arguments || "{}"); } catch {}
+          toolMessages.push({ role: "tool", tool_call_id: call.id, content: executeTool(call.function.name, args) });
+        }
+        try {
+          const followup = await streamModel(candidate, toolMessages, false, sendText);
+          if (followup.text.trim()) {
+            if (body.stream !== true) return json(res, 200, { reply: followup.text, model: candidate });
+            if (!res.writableEnded) {
+              res.write("data: [DONE]\n\n");
+              return res.end();
+            }
+            return;
+          }
+          lastFailure = "Tool result-এর পরে মডেল কোনো উত্তর দেয়নি।";
+        } catch (error) {
+          lastFailure = error.message || "Tool follow-up failed.";
+        }
+        if (streamStarted) {
+          if (!res.writableEnded) {
+            res.write("data: " + JSON.stringify({ error: { message: "হিসাবের ফল পাওয়া গেছে, কিন্তু চূড়ান্ত উত্তর শেষ হয়নি। আবার চেষ্টা করো।" } }) + "\n\n");
+            res.end();
+          }
+          return;
+        }
+        continue;
+      }
+
+      if (firstResult.text.trim()) {
+        if (body.stream !== true) return json(res, 200, { reply: firstResult.text, model: candidate });
+        if (!res.writableEnded) {
+          res.write("data: [DONE]\n\n");
+          return res.end();
+        }
+        return;
+      }
+      lastFailure = "মডেল কোনো text উত্তর দেয়নি; অন্য ফ্রি মডেল চেষ্টা করা হচ্ছে।";
     }
 
-    const answer = finalData?.choices?.[0]?.message?.content;
-    if (typeof answer !== "string" || !answer.trim()) {
-      return json(res, 502, {
-        error: "দুঃখিত, এই মুহূর্তে কোনো ফ্রি AI মডেল উত্তর দিতে পারছে না। কিছুক্ষণ পরে আবার চেষ্টা করো।",
-        detail: lastFailure || "সব চেষ্টা করা মডেল থেকে খালি উত্তর এসেছে।"
-      });
+    if (clientDisconnected) return;
+    if (body.stream === true && responseHeaders) {
+      if (!res.writableEnded) {
+        res.write("data: " + JSON.stringify({ error: { message: "এই মুহূর্তে কোনো ফ্রি AI মডেল উত্তর দিতে পারছে না।" } }) + "\n\n");
+        res.end();
+      }
+      return;
     }
-    if (body.stream !== true) return json(res, 200, { reply: answer, id: finalData.id, model: finalData.model || activeModel });
-    res.statusCode = 200;
-    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    for (let i = 0; i < answer.length; i += 32) {
-      res.write("data: " + JSON.stringify({ choices: [{ delta: { content: answer.slice(i, i + 32) } }] }) + "\n\n");
-    }
-    res.write("data: [DONE]\n\n");
-    return res.end();
+    return json(res, 502, {
+      error: "দুঃখিত, এই মুহূর্তে কোনো ফ্রি AI মডেল উত্তর দিতে পারছে না। কিছুক্ষণ পরে আবার চেষ্টা করো।",
+      detail: lastFailure || "সব চেষ্টা করা মডেল থেকে খালি উত্তর এসেছে."
+    });
   } catch (err) {
     console.error("OpenRouter API error:", err?.message || err);
+    if (clientDisconnected) return;
     if (!res.headersSent) return json(res, 502, { error: "OpenRouter-এ সংযোগ করা যায়নি। API key, model availability এবং free limit পরীক্ষা করো।" });
-    return res.end();
+    if (!res.writableEnded) return res.end();
   }
 };
