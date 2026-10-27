@@ -36,6 +36,10 @@ async function enhancePrompt(input) {
 
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Shakil-Api-Key, X-Turnstile-Token");
+  if (req.method === "OPTIONS") { res.statusCode = 204; return res.end(); }
   if (req.method !== "POST") { res.setHeader("Allow", "POST"); return json(res, 405, { error: "Use POST for image generation." }); }
   const ip = getClientIp(req);
   const parsed = parseBody(req, 256 * 1024);
