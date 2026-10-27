@@ -24,7 +24,8 @@ Required for chat:
 
 Optional for live web search:
 - `TAVILY_API_KEY` — server-side Tavily key. Without it, ordinary chat continues but live search is unavailable.
-- `WEB_SEARCH_DAILY_GLOBAL_LIMIT=1000` — optional total daily web search cap across the deployment (requires Upstash Redis for a shared persistent cap).
+- `WEB_SEARCH_DAILY_GLOBAL_LIMIT=1000` — optional deployment-wide daily search cap.
+- `WEB_SEARCH_DAILY_IP_LIMIT=20` and `WEB_SEARCH_DAILY_KEY_LIMIT=100` — optional per-IP and per-project-key search caps.
 
 Required for image generation:
 - `CLOUDFLARE_ACCOUNT_ID` — Cloudflare account ID.
@@ -68,8 +69,8 @@ Commits to the connected `main` branch trigger Vercel deployments. Check the dep
 Recommended smoke tests:
 1. Ask `Tmr name ki`, `Tumi ke`, and `Tomake ke baniyeche?`; verify the assistant name and creator are not confused.
 2. Send a Bengali chat question.
-2. Try a code/HTML request and verify it remains in chat mode.
-3. Send `/image a simple landscape at sunset` after adding Cloudflare environment variables.
-4. Attach an image to a normal question and test image understanding with a vision-capable model.
-5. Ask for current information after configuring `TAVILY_API_KEY`; verify the answer includes a “সূত্র:” section.
-6. Test Stop, history persistence, JSON export/import, and the Settings storage usage display.
+3. Try a code/HTML request and verify it remains in chat mode.
+4. Send `/image a simple landscape at sunset` after adding Cloudflare environment variables.
+5. Attach an image to a normal question and test image understanding with a vision-capable model.
+6. Ask for current information after configuring `TAVILY_API_KEY`; verify the answer includes a “সূত্র:” section.
+7. Test Stop, history persistence, JSON export/import, and the Settings storage usage display.
