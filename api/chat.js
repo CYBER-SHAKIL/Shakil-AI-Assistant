@@ -192,68 +192,100 @@ module.exports = async function handler(req, res) {
     }
   }];
   try {
-    let conversation = upstreamMessages;
-    let data = null;
+    const candidates = [...new Set([
+      model,
+      ...(requested === FALLBACK_MODEL ? [] : [FALLBACK_MODEL]),
+      "google/gemma-4-26b-a4b-it:free",
+      "google/gemma-4-31b-it:free",
+      "openrouter/free"
+    ])];
+    let lastFailure = null;
+    let finalData = null;
     let activeModel = model;
-    // Allow a maximum of three safe calculator tool calls per request.
-    for (let turn = 0; turn < 4; turn++) {
-      const payload = {
-        model: activeModel,
-        messages: conversation,
-        stream: false,
-        max_tokens: 1800,
-        tools,
-        tool_choice: "auto",
-        ...(activeModel !== FALLBACK_MODEL ? { models: [activeModel, FALLBACK_MODEL], route: "fallback" } : {})
-      };
-      let upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + apiKey,
-          "Content-Type": "application/json",
-          "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app",
-          "X-Title": "Shakil AI Assistant"
-        },
-        body: JSON.stringify(payload)
-      });
-      if (!upstream.ok) {
-        const detail = (await upstream.text()).slice(0, 900);
-        // Some free models do not support function calling. Retry without tools.
-        if (turn === 0 && (upstream.status === 400 || upstream.status === 422)) {
-          const retryPayload = { ...payload, messages: upstreamMessages };
-          delete retryPayload.tools; delete retryPayload.tool_choice;
+
+    // Try each distinct free model in sequence. Empty responses, unsupported tool
+    // calling, provider errors, and transient failures all trigger a fallback.
+    for (const candidate of candidates) {
+      activeModel = candidate;
+      let candidateMessages = upstreamMessages;
+      let candidateData = null;
+      let candidateSucceeded = false;
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const payload = {
+          model: candidate,
+          messages: candidateMessages,
+          stream: false,
+          max_tokens: 1800,
+          ...(attempt === 0 ? { tools, tool_choice: "auto" } : {})
+        };
+        let upstream;
+        try {
           upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
-            headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json", "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app", "X-Title": "Shakil AI Assistant" },
-            body: JSON.stringify(retryPayload)
+            headers: {
+              Authorization: "Bearer " + apiKey,
+              "Content-Type": "application/json",
+              "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app",
+              "X-Title": "Shakil AI Assistant"
+            },
+            body: JSON.stringify(payload)
           });
-          if (!upstream.ok) return json(res, upstream.status, { error: "OpenRouter API request failed.", detail: (await upstream.text()).slice(0, 900) });
-          data = await upstream.json();
+        } catch (e) {
+          lastFailure = "OpenRouter-এ সংযোগ করা যায়নি।";
           break;
         }
-        return json(res, upstream.status, { error: "OpenRouter API request failed.", detail });
+
+        if (!upstream.ok) {
+          lastFailure = "মডেল " + candidate + " অনুরোধটি সম্পন্ন করতে পারেনি (" + upstream.status + ").";
+          // Some free models do not support function calling. Retry this model without tools.
+          if (attempt === 0 && (upstream.status === 400 || upstream.status === 422)) continue;
+          break;
+        }
+
+        try { candidateData = await upstream.json(); }
+        catch { lastFailure = "মডেল থেকে সঠিক JSON উত্তর পাওয়া যায়নি।"; break; }
+
+        const candidateMessage = candidateData?.choices?.[0]?.message;
+        const candidateCalls = Array.isArray(candidateMessage?.tool_calls) ? candidateMessage.tool_calls : [];
+        if (candidateCalls.length && attempt === 0) {
+          let toolConversation = [...upstreamMessages, { role: "assistant", content: candidateMessage.content || null, tool_calls: candidateCalls }];
+          for (const call of candidateCalls.slice(0, 3)) {
+            let args = {};
+            try { args = JSON.parse(call.function?.arguments || "{}"); } catch {}
+            toolConversation.push({ role: "tool", tool_call_id: call.id, content: executeTool(call.function?.name, args) });
+          }
+          candidateMessages = toolConversation;
+          // Make one follow-up call with tool results, without offering additional tools.
+          continue;
+        }
+
+        const answer = candidateMessage?.content;
+        if (typeof answer === "string" && answer.trim()) {
+          finalData = candidateData;
+          candidateSucceeded = true;
+          break;
+        }
+        lastFailure = "মডেল কোনো text উত্তর দেয়নি; অন্য ফ্রি মডেল চেষ্টা করা হচ্ছে।";
+        break;
       }
-      data = await upstream.json();
-      const message = data.choices?.[0]?.message;
-      const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
-      if (!calls.length || turn === 3) break;
-      conversation = [...conversation, { role: "assistant", content: message.content || null, tool_calls: calls }];
-      for (const call of calls) {
-        let args = {};
-        try { args = JSON.parse(call.function?.arguments || "{}"); } catch {}
-        const result = executeTool(call.function?.name, args);
-        conversation.push({ role: "tool", tool_call_id: call.id, content: result });
-      }
+
+      if (candidateSucceeded) break;
     }
-    const answer = data?.choices?.[0]?.message?.content;
-    if (typeof answer !== "string" || !answer.trim()) return json(res, 502, { error: "মডেল কোনো text উত্তর দেয়নি। অন্য free model নির্বাচন করে আবার চেষ্টা করো।" });
-    if (body.stream !== true) return json(res, 200, { reply: answer, id: data.id, model: data.model || model });
+
+    const answer = finalData?.choices?.[0]?.message?.content;
+    if (typeof answer !== "string" || !answer.trim()) {
+      return json(res, 502, {
+        error: "দুঃখিত, এই মুহূর্তে কোনো ফ্রি AI মডেল উত্তর দিতে পারছে না। কিছুক্ষণ পরে আবার চেষ্টা করো।",
+        detail: lastFailure || "সব চেষ্টা করা মডেল থেকে খালি উত্তর এসেছে।"
+      });
+    }
+    if (body.stream !== true) return json(res, 200, { reply: answer, id: finalData.id, model: finalData.model || activeModel });
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
-    // Send the completed answer as short SSE chunks for the existing streaming UI.
     for (let i = 0; i < answer.length; i += 32) {
       res.write("data: " + JSON.stringify({ choices: [{ delta: { content: answer.slice(i, i + 32) } }] }) + "\n\n");
     }
