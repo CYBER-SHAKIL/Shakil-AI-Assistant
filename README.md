@@ -66,7 +66,8 @@ Image generation and provider APIs may have usage limits or costs depending on t
 Commits to the connected `main` branch trigger Vercel deployments. Check the deployment state in Vercel after each commit. A deployment marked `READY` does not by itself prove that every live API call works.
 
 Recommended smoke tests:
-1. Send a Bengali chat question.
+1. Ask `Tmr name ki`, `Tumi ke`, and `Tomake ke baniyeche?`; verify the assistant name and creator are not confused.
+2. Send a Bengali chat question.
 2. Try a code/HTML request and verify it remains in chat mode.
 3. Send `/image a simple landscape at sunset` after adding Cloudflare environment variables.
 4. Attach an image to a normal question and test image understanding with a vision-capable model.
