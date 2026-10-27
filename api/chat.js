@@ -251,6 +251,10 @@ module.exports = async function handler(req, res) {
       });
       if (!upstream.ok) {
         const detail = (await upstream.text().catch(() => "")).slice(0, 300);
+        // Some free models reject tool schemas. Retry that model once without tools.
+        if (offerTools && [400, 422].includes(upstream.status) && /tool|function|unsupported|not support|parameter/i.test(detail)) {
+          return await streamModel(candidate, candidateMessages, false, onText);
+        }
         const error = new Error("মডেল " + candidate + " অনুরোধটি সম্পন্ন করতে পারেনি (" + upstream.status + ").");
         error.status = upstream.status;
         error.detail = detail;
