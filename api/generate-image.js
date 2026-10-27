@@ -74,7 +74,7 @@ module.exports = async function handler(req, res) {
       if (error.message === "OPENROUTER_NOT_CONFIGURED") return json(res, 503, { error: "Prompt enhancement-এর জন্য OPENROUTER_API_KEY configure করতে হবে।" });
       enhanced = prompt;
     }
-    const upstream = await fetch("https://api.cloudflare.com/client/v4/accounts/" + encodeURIComponent(accountId) + "/ai/run/" + encodeURIComponent(IMAGE_MODEL), {
+    const upstream = await fetch("https://api.cloudflare.com/client/v4/accounts/" + encodeURIComponent(accountId) + "/ai/run/" + IMAGE_MODEL, {
       method: "POST",
       headers: { Authorization: "Bearer " + cfToken, "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: enhanced.slice(0, 2048), steps: 4 }),
