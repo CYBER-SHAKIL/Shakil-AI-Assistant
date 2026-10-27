@@ -5,7 +5,7 @@ module.exports = async function handler(req, res) {
   if (!process.env.OPENROUTER_API_KEY) { res.statusCode = 503; return res.end(JSON.stringify({ error: "OpenRouter is not configured." })); }
   try {
     const response = await fetch("https://openrouter.ai/api/v1/models", {
-      headers: { Authorization: "Bearer " + process.env.OPENROUTER_API_KEY, "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant.vercel.app", "X-Title": "Shakil AI Assistant" }
+      headers: { Authorization: "Bearer " + process.env.OPENROUTER_API_KEY, "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app", "X-Title": "Shakil AI Assistant" }
     });
     if (!response.ok) { res.statusCode = response.status; return res.end(JSON.stringify({ error: "Could not load model list." })); }
     const data = await response.json();
