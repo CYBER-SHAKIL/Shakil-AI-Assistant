@@ -15,6 +15,9 @@ The chat backend uses **OpenRouter**. The OpenRouter key must stay on Vercel and
 Do not send your key in chat or commit it to GitHub.
 
 Optional:
+- `TAVILY_API_KEY` — server-only Tavily Search API key. Without it, live search is unavailable but ordinary chat continues.
+- `WEB_SEARCH_DAILY_IP_LIMIT=20` — optional per-IP daily search cap.
+- `WEB_SEARCH_DAILY_KEY_LIMIT=100` — optional per-project-API-key daily search cap.
 - `OPENROUTER_DEFAULT_MODEL=google/gemma-4-31b-it:free`
 - `APP_URL=https://shakil-ai-assistant-lime.vercel.app`
 
@@ -22,7 +25,7 @@ The site defaults to `google/gemma-4-31b-it:free`, loads currently available fre
 
 ## 2. Chat, coding, and image understanding
 
-- `POST /api/chat` — text chat, coding help, streaming responses, and attached-image understanding when the selected model supports image input.
+- `POST /api/chat` — text chat, coding help, streaming responses, calculator calls, optional Tavily web search, and attached-image understanding when the selected model supports image input.
 - `GET /api/models` — retrieves the currently available free OpenRouter models and their image-input capability.
 
 Example request:
@@ -38,6 +41,8 @@ Example request:
 ```
 
 The browser sends attached images as multimodal `image_url` content to `/api/chat`. Choose a model marked as supporting image input for image questions. Availability and free limits can change on OpenRouter.
+
+When configured, the backend can call Tavily for current or changing information. Search is optional and uses the server-side `TAVILY_API_KEY`; the key is never sent to the browser. Results are limited to five short title/URL/snippet entries, search usage is capped per IP and project API key, and the model is instructed to treat search snippets as untrusted content and cite useful URLs in a `সূত্র:` section. The backend allows at most two tool rounds per chat request. If Tavily is not configured, normal chat continues and the assistant is told live search is unavailable.
 
 ## 3. Image generation with Cloudflare Workers AI
 
@@ -64,7 +69,7 @@ Use an explicit command such as `/image বাংলার নদীর ধা�
 - **Chat mode:** Bengali-first conversation and coding help.
 - **Study mode:** step-by-step explanations and examples, selected from the Study chip beside the composer.
 - **Image understanding:** attach an image and select a free model marked “Image input”; `openrouter/free` can route to a model supporting image input.
-- **Tool calling:** the chat backend exposes a limited arithmetic calculator function. It parses basic arithmetic directly and does not run arbitrary JavaScript, shell commands, or external actions. If a selected model does not support function calling, the backend retries the request without tools.
+- **Tool calling:** the chat backend exposes a limited arithmetic calculator and optional Tavily `web_search` function. It parses basic arithmetic directly and does not run arbitrary JavaScript, shell commands, or external actions. If a selected model does not support function calling, the backend retries the request without tools.
 - **Send button:** green 3D-style button with pressed-state feedback.
 
 ## 6. Verification notes
