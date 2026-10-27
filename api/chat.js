@@ -188,20 +188,19 @@ module.exports = async function handler(req, res) {
   const previousAssistant = messages.slice(0, -1).reverse().find(m => m.role === "assistant" && typeof m.content === "string");
   const assistantAskedQuestion = /[?？]\s*$/.test(previousAssistant?.content || "");
   let quickReply = "";
-  if (!assistantAskedQuestion) {
-    if (/^(tmr|tomar|তোমার)\s*(name|naam|নাম)\s*(ki|কী|কি)$/.test(latestText)) {
-      quickReply = "আমার নাম Shakil AI Assistant 😊";
-    } else if (/^(tumi|tui|apni|তুমি|তুই|আপনি)\s*(ke|কে)$/.test(latestText)) {
-      quickReply = "আমি Shakil AI Assistant, Shakil আমাকে তৈরি করেছেন 😊";
-    } else if (/^(tomake|tmk|amke|তোমাকে|আমাকে)\s*(ke|কে)(\s*(baniyeche|baniyese|banayche|বানিয়েছে|বানিয়েছে|বানাইছে|তৈরি করেছে|তৈরি করল))?$/.test(latestText) || /^(who made you|who created you|amke ke baniyese go|tomake ke baniyese go)$/.test(latestText)) {
-      quickReply = "আমাকে তৈরি করেছে Shakil 😊";
-    } else if (/^(shakil ke|শাকিল কে)$/.test(latestText)) {
-      quickReply = "Shakil হলো এই AI Assistant-এর নির্মাতা।";
-    } else if (/^(kisu na|kichu na|কিছু না|কিছুই না|nothing)$/.test(latestText)) {
-      quickReply = "আচ্ছা, ঠিক আছে 😄";
-    } else if (/^(na|না|no)$/.test(latestText)) {
-      quickReply = "আচ্ছা, ঠিক আছে 😊";
-    }
+  // Identity questions must work even immediately after a greeting or another assistant question.
+  if (/^(tmr|tomar|তোমার)\s*(name|naam|নাম)\s*(ki|কী|কি)$/.test(latestText)) {
+    quickReply = "আমার নাম Shakil AI Assistant 😊";
+  } else if (/^(tumi|tui|apni|তুমি|তুই|আপনি)\s*(ke|কে)$/.test(latestText)) {
+    quickReply = "আমি Shakil AI Assistant, Shakil আমাকে তৈরি করেছেন 😊";
+  } else if (/^(tomake|tmk|amke|তোমাকে|আমাকে)\s*(ke|কে)(\s*(baniyeche|baniyese|banayche|বানিয়েছে|বানিয়েছে|বানাইছে|তৈরি করেছে|তৈরি করল))?$/.test(latestText) || /^(who made you|who created you|amke ke baniyese go|tomake ke baniyese go)$/.test(latestText)) {
+    quickReply = "আমাকে তৈরি করেছে Shakil 😊";
+  } else if (/^(shakil ke|শাকিল কে)$/.test(latestText)) {
+    quickReply = "Shakil হলো এই AI Assistant-এর নির্মাতা।";
+  } else if (!assistantAskedQuestion && /^(kisu na|kichu na|কিছু না|কিছুই না|nothing)$/.test(latestText)) {
+    quickReply = "আচ্ছা, ঠিক আছে 😄";
+  } else if (!assistantAskedQuestion && /^(na|না|no)$/.test(latestText)) {
+    quickReply = "আচ্ছা, ঠিক আছে 😊";
   }
   if (quickReply) return respondText(req, res, quickReply);
   const apiKey = process.env.OPENROUTER_API_KEY;
