@@ -20,7 +20,7 @@ Optional:
 - `WEB_SEARCH_DAILY_IP_LIMIT=20` — optional per-IP daily search cap.
 - `WEB_SEARCH_DAILY_KEY_LIMIT=100` — optional per-project-API-key daily search cap.
 - `OPENROUTER_DEFAULT_MODEL=google/gemma-4-31b-it:free`
-- `APP_URL=https://shakil-ai-assistant.vercel.app`
+- `APP_URL=https://shakil-ai-assistant-lime.vercel.app`
 
 The site and server default to `google/gemma-4-31b-it:free`. Settings also lets users select `openrouter/free` for automatic free-model routing. The server accepts free model IDs ending in `:free` plus `openrouter/free`; fallback candidates include `openrouter/free`.
 
@@ -94,7 +94,7 @@ In Settings, enter the admin secret and create a project key. The raw key is sho
 External project requests use the same chat endpoint:
 
 ```bash
-curl https://shakil-ai-assistant.vercel.app/api/chat \
+curl https://shakil-ai-assistant-lime.vercel.app/api/chat \
   -H "Content-Type: application/json" \
   -H "x-shakil-api-key: sk-shakil-YOUR_KEY" \
   -d '{"model":"openrouter/free","stream":false,"messages":[{"role":"user","content":"বাংলায় একটি HTML উদাহরণ দাও"}]}'
