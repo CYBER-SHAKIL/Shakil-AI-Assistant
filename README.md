@@ -7,6 +7,7 @@ A Bengali-first AI chat app with a static `index.html` frontend and Vercel serve
 - Bengali-first chat and coding help with streamed responses.
 - OpenRouter chat models, including the `openrouter/free` routing option.
 - Image understanding when the selected chat model supports vision.
+- Optional live web search through Tavily for current or changing information, with source URLs.
 - Image generation through Cloudflare Workers AI using `@cf/black-forest-labs/flux-1-schnell`.
 - IndexedDB storage for conversations and image blobs, with migration from the older localStorage conversation key.
 - Client-side image resizing/compression before upload.
@@ -19,6 +20,7 @@ Configure these in Vercel → Project → Settings → Environment Variables, th
 
 Required for chat:
 - `OPENROUTER_API_KEY` — server-side OpenRouter key.
+- `TAVILY_API_KEY` — optional server-side Tavily key for live web search.
 
 Required for image generation:
 - `CLOUDFLARE_ACCOUNT_ID` — Cloudflare account ID.
@@ -48,7 +50,7 @@ Cloudflare's FLUX.1 schnell endpoint returns base64 image data; the API route re
 
 ## API endpoints
 
-- `POST /api/chat` — OpenRouter chat and streaming.
+- `POST /api/chat` — OpenRouter chat, streaming, calculator, and optional Tavily web search.
 - `GET /api/models` — available free chat models.
 - `POST /api/generate-image` — Cloudflare Workers AI image generation.
 - `POST /api/keys` — Firebase-backed project API key management.
@@ -64,4 +66,5 @@ Recommended smoke tests:
 2. Try a code/HTML request and verify it remains in chat mode.
 3. Send `/image a simple landscape at sunset` after adding Cloudflare environment variables.
 4. Attach an image to a normal question and test image understanding with a vision-capable model.
-5. Test Stop, history persistence, JSON export/import, and the Settings storage usage display.
+5. Ask for current information after configuring `TAVILY_API_KEY`; verify the answer includes a “সূত্র:” section.
+6. Test Stop, history persistence, JSON export/import, and the Settings storage usage display.
