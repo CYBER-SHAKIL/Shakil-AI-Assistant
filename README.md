@@ -12,6 +12,7 @@ A Bengali-first AI chat app with a static `index.html` frontend and Vercel serve
 - IndexedDB storage for conversations and image blobs, with migration from the older localStorage conversation key.
 - Client-side image resizing/compression before upload.
 - Server-side provider credentials; no provider secrets belong in frontend code.
+- Local profile image path `/assets/shakil-dev-profile.png`, with an initials fallback until that asset is supplied.
 - Firebase-backed project API key management when its server environment variables are configured.
 
 ## Environment variables
