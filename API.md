@@ -39,9 +39,18 @@ Example request:
 
 The browser sends attached images as multimodal `image_url` content to `/api/chat`. Choose a model marked as supporting image input for image questions. Availability and free limits can change on OpenRouter.
 
-## 3. Image generation is separate
+## 3. Image generation with Cloudflare Workers AI
 
-The current `POST /api/generate-image` endpoint still uses an OpenAI image-generation API and therefore requires a separate `OPENAI_API_KEY` in Vercel. An OpenRouter key alone does not enable this endpoint. If you only add the OpenRouter key, chat, coding, free-model selection, and supported image understanding can work, but image generation will remain unavailable until its backend is changed to a compatible image provider and configured with that provider's key.
+Image generation uses Cloudflare Workers AI model `@cf/black-forest-labs/flux-1-schnell` through `POST /api/generate-image`. Bengali prompts are optionally enhanced into a detailed English prompt with the server-side OpenRouter key. The browser never receives either provider key.
+
+Add these server-only variables in Vercel → Settings → Environment Variables:
+- `CLOUDFLARE_ACCOUNT_ID` — your Cloudflare account ID.
+- `CLOUDFLARE_API_TOKEN` — a Cloudflare API token with Workers AI permission.
+- `OPENROUTER_API_KEY` — also used for text chat and prompt enhancement.
+
+Redeploy after saving environment variables. Cloudflare Workers AI usage and limits depend on your Cloudflare account; do not assume unlimited free generation.
+
+Use an explicit command such as `/image বাংলার নদীর ধারে সূর্যাস্ত, cinematic lighting` to generate an image. HTML, SVG, and code requests remain normal chat requests. Image-to-image generation using an uploaded reference image is not supported yet; remove attachments when using `/image`.
 
 ## 4. Security and limitations
 
@@ -85,4 +94,4 @@ curl https://shakil-ai-assistant-lime.vercel.app/api/chat \
   -d '{"model":"openrouter/free","stream":false,"messages":[{"role":"user","content":"বাংলায় একটি HTML উদাহরণ দাও"}]}'
 ```
 
-The response is JSON when `stream` is false. Set `stream` to true for server-sent events. For image generation, POST to `/api/generate-image` with `x-shakil-api-key` and JSON like `{"prompt":"A sunset over a river","model":"gpt-image-2.5-flare"}`. Keep project keys on the server side of your own apps; do not ship them in public browser JavaScript.
+The response is JSON when `stream` is false. Set `stream` to true for server-sent events. For image generation, POST to `/api/generate-image` with `x-shakil-api-key` and JSON like `{"prompt":"A sunset over a river"}`. The server uses Cloudflare Workers AI; no image model selector is sent from the browser. Keep project keys on the server side of your own apps; do not ship them in public browser JavaScript.
