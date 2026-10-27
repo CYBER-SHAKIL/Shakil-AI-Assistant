@@ -322,6 +322,18 @@ module.exports = async function handler(req, res) {
     let streamStarted = false;
     let responseText = "";
     let responseHeaders = false;
+    const sendStatus = status => {
+      if (body.stream !== true || res.writableEnded) return;
+      if (!responseHeaders) {
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+        res.setHeader("Cache-Control", "no-cache, no-transform");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
+        responseHeaders = true;
+      }
+      res.write("data: " + JSON.stringify({ status }) + "\\n\\n");
+    };
     const sendText = chunk => {
       responseText += chunk;
       if (body.stream !== true) return;
@@ -361,33 +373,36 @@ module.exports = async function handler(req, res) {
         continue;
       }
 
-      if (firstResult.toolCalls.length && !firstResult.text) {
-        const toolMessages = [
-          ...upstreamMessages,
-          { role: "assistant", content: null, tool_calls: firstResult.toolCalls.slice(0, 3) }
-        ];
-        for (const call of firstResult.toolCalls.slice(0, 3)) {
-          let args = {};
-          try { args = JSON.parse(call.function.arguments || "{}"); } catch {}
-          toolMessages.push({ role: "tool", tool_call_id: call.id, content: executeTool(call.function.name, args) });
-        }
-        try {
-          const followup = await streamModel(candidate, toolMessages, false, sendText);
-          if (followup.text.trim()) {
-            if (body.stream !== true) return json(res, 200, { reply: followup.text, model: candidate });
-            if (!res.writableEnded) {
-              res.write("data: [DONE]\n\n");
-              return res.end();
-            }
-            return;
+      if (firstResult.toolCalls.length) {
+        let toolResult = firstResult;
+        let toolMessages = upstreamMessages;
+        let toolFailure = null;
+        for (let round = 0; round < 2 && toolResult.toolCalls.length; round++) {
+          const calls = toolResult.toolCalls.slice(0, 3);
+          toolMessages = [...toolMessages, { role: "assistant", content: toolResult.text || null, tool_calls: calls }];
+          for (const call of calls) {
+            let args = {};
+            try { args = JSON.parse(call.function.arguments || "{}"); } catch {}
+            let output;
+            if (call.function.name === "calculator") output = executeTool(call.function.name, args);
+            else if (call.function.name === "web_search") {
+              sendStatus("searching");
+              output = await searchWeb(args, ip, keyAuth, req);
+            } else output = JSON.stringify({ error: "Tool not permitted" });
+            toolMessages.push({ role: "tool", tool_call_id: call.id, content: output });
           }
-          lastFailure = "Tool result-এর পরে মডেল কোনো উত্তর দেয়নি।";
-        } catch (error) {
-          lastFailure = error.message || "Tool follow-up failed.";
+          try { toolResult = await streamModel(candidate, toolMessages, round < 1, sendText); }
+          catch (error) { toolFailure = error.message || "Tool follow-up failed."; break; }
         }
+        if (toolFailure) lastFailure = toolFailure;
+        else if (toolResult.text.trim()) {
+          if (body.stream !== true) return json(res, 200, { reply: toolResult.text, model: candidate });
+          if (!res.writableEnded) { res.write("data: [DONE]\\n\\n"); return res.end(); }
+          return;
+        } else lastFailure = "Tool result-এর পরে মডেল কোনো উত্তর দেয়নি।";
         if (streamStarted) {
           if (!res.writableEnded) {
-            res.write("data: " + JSON.stringify({ error: { message: "হিসাবের ফল পাওয়া গেছে, কিন্তু চূড়ান্ত উত্তর শেষ হয়নি। আবার চেষ্টা করো।" } }) + "\n\n");
+            res.write("data: " + JSON.stringify({ error: { message: "Tool result-এর পরে উত্তর শেষ হয়নি। আবার চেষ্টা করো।" } }) + "\\n\\n");
             res.end();
           }
           return;
