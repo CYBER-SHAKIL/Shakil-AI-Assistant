@@ -68,7 +68,7 @@ let autoModelCache = { at: 0, models: [] };
 async function chooseAutoModel(messages) {
   try {
     if (Date.now() - autoModelCache.at > 300000 || !autoModelCache.models.length) {
-      const response = await fetch("https://openrouter.ai/api/v1/models", { headers: { Authorization: "Bearer " + process.env.OPENROUTER_API_KEY, "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant.vercel.app", "X-Title": "Shakil AI Assistant" } });
+      const response = await fetch("https://openrouter.ai/api/v1/models", { headers: { Authorization: "Bearer " + process.env.OPENROUTER_API_KEY, "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app", "X-Title": "Shakil AI Assistant" } });
       if (!response.ok) return FALLBACK_MODEL;
       const data = await response.json();
       autoModelCache.models = (data.data || []).filter(m => m.id?.endsWith(":free") && Number(m.pricing?.prompt || 0) === 0 && Number(m.pricing?.completion || 0) === 0);
@@ -244,7 +244,7 @@ module.exports = async function handler(req, res) {
         headers: {
           Authorization: "Bearer " + apiKey,
           "Content-Type": "application/json",
-          "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant.vercel.app",
+          "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app",
           "X-Title": "Shakil AI Assistant"
         },
         body: JSON.stringify(payload),
