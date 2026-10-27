@@ -20,41 +20,8 @@ const BASE_PROMPT = `তুমি Shakil AI Assistant, Shakil-এর তৈর�
 11. OpenRouter API key বা অন্য কোনো secret প্রকাশ করবে না।
 12. কেবল অনুমোদিত calculator tool ব্যবহার করবে; arbitrary code, shell command বা বাইরের action চালাবে না.\n13. তুমি সাধারণ প্রশ্ন, coding, পড়াশোনা, গণিত, সংযুক্ত ছবি বোঝা এবং অনুরোধ অনুযায়ী code file তৈরি করতে সাহায্য করতে পারো। Code block-এ Copy ও Download সুবিধা আছে; HTML code block-এ sandboxed Live preview থাকে। কথোপকথন Print থেকে PDF হিসেবে save করা যায়। কোনো কোড সত্যিকারের run/test করা হয়েছে বলে দাবি করবে না যদি না Live preview-তে ব্যবহারকারী নিজে চালায়।`;
 // Mode selection is removed; infer the task from each user message.
-const windows = new Map();
-function limited(ip) {
-  const now = Date.now(), old = windows.get(ip);
-  if (!old || now - old.start > 60_000) { windows.set(ip, { start: now, count: 1 }); return false; }
-  old.count++;
-  return old.count > 20;
-}
-async function verifyShakilApiKey(key) {
-  if (typeof key !== "string" || !key.startsWith("sk-shakil-")) return false;
-  let account;
-  try { account = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "{}"); } catch {}
-  const dbUrl = String(process.env.FIREBASE_DATABASE_URL || "").replace(/\/$/, "");
-  if (!account?.client_email || !account?.private_key || !dbUrl) return false;
-  try {
-    const now = Math.floor(Date.now() / 1000);
-    const b64 = v => Buffer.from(v).toString("base64url");
-    const unsigned = b64(JSON.stringify({alg:"RS256",typ:"JWT"}))+"."+b64(JSON.stringify({iss:account.client_email,scope:"https://www.googleapis.com/auth/firebase.database https://www.googleapis.com/auth/userinfo.email",aud:account.token_uri||"https://oauth2.googleapis.com/token",iat:now,exp:now+3600}));
-    const signer = require("node:crypto").createSign("RSA-SHA256"); signer.update(unsigned); signer.end();
-    const assertion = unsigned+"."+signer.sign(account.private_key,"base64url");
-    const tokenResponse = await fetch(account.token_uri||"https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"urn:ietf:params:oauth:grant-type:jwt-bearer",assertion})});
-    const tokenData = await tokenResponse.json();
-    if (!tokenResponse.ok || !tokenData.access_token) return false;
-    const hash = require("node:crypto").createHash("sha256").update(key).digest("hex");
-    const response = await fetch(dbUrl+"/shakilApiKeys/"+hash+".json",{headers:{Authorization:"Bearer "+tokenData.access_token}});
-    if (!response.ok) return false;
-    const record = await response.json();
-    return !!record && record.revoked !== true;
-  } catch { return false; }
-}
-function json(res, status, body) {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("Cache-Control", "no-store");
-  res.end(JSON.stringify(body));
-}
+const { getClientIp, json, parseBody, rateLimit, verifyTurnstile, requireValidKey } = require("./_lib/auth");
+
 function respondText(req, res, text) {
   if (req.body?.stream !== true) return json(res, 200, { reply: text, model: "greeting" });
   res.statusCode = 200;
@@ -137,27 +104,56 @@ function executeTool(name, args) {
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   if (req.method !== "POST") { res.setHeader("Allow", "POST"); return json(res, 405, { error: "Use POST for chat requests." }); }
-  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
-  if (limited(ip)) return json(res, 429, { error: "অনেকগুলো অনুরোধ হয়েছে। এক মিনিট পরে আবার চেষ্টা করো।" });
-  let body;
-  try { body = typeof req.body === "object" && req.body !== null ? req.body : JSON.parse(req.body || "{}"); }
-  catch { return json(res, 400, { error: "Invalid JSON request body." }); }
+  const ip = getClientIp(req);
+  const parsed = parseBody(req, 3.7 * 1024 * 1024);
+  if (parsed.error) return json(res, parsed.status, { error: parsed.error });
+  const body = parsed.body;
+  const keyAuth = await requireValidKey(req);
+  if (keyAuth.required && !keyAuth.ok) return json(res, 401, { error: "Invalid or revoked Shakil API key." });
+  if (!keyAuth.required) {
+    const challenge = await verifyTurnstile(req);
+    if (!challenge.ok) return json(res, 403, { error: "Cloudflare Turnstile verification failed. আবার যাচাই করে চেষ্টা করো।" });
+  }
+  const ipLimit = await rateLimit("chat:ip:" + ip, Number(process.env.CHAT_RATE_LIMIT_PER_MINUTE) || 20, 60);
+  if (ipLimit.limited) return json(res, 429, { error: "অনেকগুলো অনুরোধ হয়েছে। এক মিনিট পরে আবার চেষ্টা করো।" });
+  if (keyAuth.required) {
+    const keyLimit = await rateLimit("chat:key:" + String(req.headers["x-shakil-api-key"] || req.headers.authorization || "").trim(), Number(process.env.API_KEY_DAILY_CHAT_LIMIT) || 500, 86400);
+    if (keyLimit.limited) return json(res, 429, { error: "এই API key-এর দৈনিক chat limit শেষ হয়েছে।" });
+  }
   if (!Array.isArray(body.messages) || body.messages.length === 0 || body.messages.length > 40) return json(res, 400, { error: "messages must be a non-empty array with at most 40 items." });
-  const messages = body.messages
-    .filter(m => m && ["user", "assistant", "system"].includes(m.role) && (typeof m.content === "string" || Array.isArray(m.content)))
-    .slice(-30).map(m => ({ role: m.role, content: typeof m.content === "string" ? m.content.slice(0, 12000) : m.content }));
+  const messages = [];
+  let imageBytes = 0;
+  for (const item of body.messages.slice(-30)) {
+    if (!item || !["user","assistant"].includes(item.role)) return json(res, 400, { error: "শুধু user ও assistant message গ্রহণ করা হয়; system role অনুমোদিত নয়।" });
+    if (typeof item.content === "string") {
+      if (item.content.length > 12000) return json(res, 413, { error: "একটি message অনেক বড়। 12,000 অক্ষরের মধ্যে রাখো।" });
+      messages.push({role:item.role,content:item.content});
+      continue;
+    }
+    if (!Array.isArray(item.content) || item.content.length > 6) return json(res, 400, { error: "Message content must be text or a small text/image array." });
+    const content = [];
+    for (const part of item.content) {
+      if (part?.type === "text" && typeof part.text === "string" && part.text.length <= 12000) {
+        content.push({type:"text",text:part.text});
+      } else if (part?.type === "image_url" && typeof part.image_url?.url === "string") {
+        const url = part.image_url.url;
+        if (!/^data:image\/(?:png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(url)) return json(res,400,{error:"Only base64 data:image URLs are accepted for images."});
+        imageBytes += Math.floor(url.length * 3 / 4);
+        if (imageBytes > 2.5 * 1024 * 1024) return json(res,413,{error:"ছবির মোট আকার 2.5 MB-এর মধ্যে রাখো।"});
+        content.push({type:"image_url",image_url:{url}});
+      } else {
+        return json(res,400,{error:"Unsupported message content part."});
+      }
+    }
+    messages.push({role:item.role,content});
+  }
   if (!messages.length || !messages.some(m => m.role === "user")) return json(res, 400, { error: "At least one user message is required." });
   const latestUserMessage = messages.filter(m => m.role === "user").slice(-1)[0];
   const greeting = typeof latestUserMessage?.content === "string" ? latestUserMessage.content.trim().toLowerCase().replace(/[.!?。！؟]+$/g, "").replace(/\s+/g, " ") : "";
   if (/^(hi|hlw|hello|hey|হাই|হ্যালো|হেলো|হ্যালোও|আসসালামু আলাইকুম)$/.test(greeting)) {
     return respondText(req, res, "হাই! আমি Shakil AI Assistant! 😊\n\nআমি আপনার সাহায্যের জন্য এখানে আছি। আমি কীভাবে আপনাকে সাহায্য করতে পারি?");
   }
-  const externalKey = req.headers["x-shakil-api-key"] || (String(req.headers.authorization || "").startsWith("Bearer sk-shakil-") ? String(req.headers.authorization).slice(7) : "");
-  const origin = String(req.headers.origin || "");
-  let isOwnWebsite = false;
-  try { const host = new URL(origin).host; const appHost = new URL(process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app").host; isOwnWebsite = host === appHost || host === "shakil-ai-assistant-lime.vercel.app" || host === "shakil-ai-assistant.vercel.app"; } catch {}
-  if (!isOwnWebsite && !externalKey) return json(res, 401, { error: "A Shakil API key is required for external project requests." });
-  if (externalKey && !(await verifyShakilApiKey(externalKey))) return json(res, 401, { error: "Invalid or revoked Shakil API key." });
+  // No Origin/Referer allowlist: website traffic is protected by Turnstile; external integrations use hashed Shakil API keys.
   // Deterministic handling for common short Bengali/Banglish conversation turns.
   const latestText = typeof latestUserMessage?.content === "string" ? latestUserMessage.content.trim().toLowerCase().replace(/[!?.,。！？؟]+$/g, "").replace(/\s+/g, " ") : "";
   let quickReply = "";
