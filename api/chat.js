@@ -106,6 +106,8 @@ async function searchWeb(args, ip, keyAuth, req) {
   const query = typeof args?.query === "string" ? args.query.trim().slice(0, 300) : "";
   if (!query) return JSON.stringify({ error: "A search query is required." });
   if (!process.env.TAVILY_API_KEY) return JSON.stringify({ error: "Live web search is not configured. Answer from existing knowledge and mention that live search is unavailable." });
+  const globalLimit = await rateLimit("search:daily:global", Number(process.env.WEB_SEARCH_DAILY_GLOBAL_LIMIT) || 1000, 86400);
+  if (globalLimit.limited) return JSON.stringify({ error: "আজকের মোট web search limit শেষ হয়েছে। পরে আবার চেষ্টা করো।" });
   const ipLimit = await rateLimit("search:daily:ip:" + ip, Number(process.env.WEB_SEARCH_DAILY_IP_LIMIT) || 20, 86400);
   if (ipLimit.limited) return JSON.stringify({ error: "এই IP-এর দৈনিক web search limit শেষ হয়েছে।" });
   if (keyAuth?.required) {
