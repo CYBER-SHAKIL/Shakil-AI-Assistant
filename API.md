@@ -16,6 +16,7 @@ Do not send your key in chat or commit it to GitHub.
 
 Optional:
 - `TAVILY_API_KEY` — server-only Tavily Search API key. Without it, live search is unavailable but ordinary chat continues.
+- `WEB_SEARCH_DAILY_GLOBAL_LIMIT=1000` — optional deployment-wide daily search cap (shared when Upstash Redis is configured).
 - `WEB_SEARCH_DAILY_IP_LIMIT=20` — optional per-IP daily search cap.
 - `WEB_SEARCH_DAILY_KEY_LIMIT=100` — optional per-project-API-key daily search cap.
 - `OPENROUTER_DEFAULT_MODEL=google/gemma-4-31b-it:free`
@@ -60,7 +61,7 @@ Use an explicit command such as `/image বাংলার নদীর ধা�
 ## 4. Security and limitations
 
 - Never put API keys in public HTML or frontend JavaScript.
-- The current rate limiter is in-memory and does not persist across Vercel serverless instances.
+- Rate limits use Upstash Redis when `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are configured; otherwise the fallback is per-instance in-memory and is not globally persistent.
 - Public endpoints can be abused; monitor OpenRouter usage and limits.
 - Free model availability, vision support, context limits, and routing behavior may change.
 
