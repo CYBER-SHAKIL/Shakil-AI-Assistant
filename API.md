@@ -20,9 +20,9 @@ Optional:
 - `WEB_SEARCH_DAILY_IP_LIMIT=20` — optional per-IP daily search cap.
 - `WEB_SEARCH_DAILY_KEY_LIMIT=100` — optional per-project-API-key daily search cap.
 - `OPENROUTER_DEFAULT_MODEL=google/gemma-4-31b-it:free`
-- `APP_URL=https://shakil-ai-assistant-lime.vercel.app`
+- `APP_URL=https://shakil-ai-assistant.vercel.app`
 
-The site defaults to `google/gemma-4-31b-it:free`, loads currently available free models from `GET /api/models`, and allows choosing a model in Settings. The server accepts free model IDs ending in `:free` plus `openrouter/free`. Chat requests also configure `openrouter/free` as the fallback route.
+The site and server default to `google/gemma-4-31b-it:free`. Settings also lets users select `openrouter/free` for automatic free-model routing. The server accepts free model IDs ending in `:free` plus `openrouter/free`; fallback candidates include `openrouter/free`.
 
 ## 2. Chat, coding, and image understanding
 
@@ -68,14 +68,14 @@ Use an explicit command such as `/image বাংলার নদীর ধা�
 ## 5. Assistant modes and safe tool calling
 
 - **Chat mode:** Bengali-first conversation and coding help.
-- **Study mode:** step-by-step explanations and examples, selected from the Study chip beside the composer.
+- **Automatic task detection:** the assistant infers whether a request needs coding help, study explanations, image understanding, or web search; there are no separate mode buttons.
 - **Image understanding:** attach an image and select a free model marked “Image input”; `openrouter/free` can route to a model supporting image input.
 - **Tool calling:** the chat backend exposes a limited arithmetic calculator and optional Tavily `web_search` function. It parses basic arithmetic directly and does not run arbitrary JavaScript, shell commands, or external actions. If a selected model does not support function calling, the backend retries the request without tools.
 - **Send button:** green 3D-style button with pressed-state feedback.
 
 ## 6. Verification notes
 
-The latest repository inline JavaScript and the `api/chat.js` and `api/models.js` server files passed JavaScript syntax checks. This is a syntax check, not an end-to-end API test. Live chat and model discovery still require `OPENROUTER_API_KEY` to be set in Vercel.
+Syntax checks do not replace end-to-end tests. Live chat and model discovery require `OPENROUTER_API_KEY` in Vercel.
 
 
 ## Firebase-backed project API keys
@@ -94,7 +94,7 @@ In Settings, enter the admin secret and create a project key. The raw key is sho
 External project requests use the same chat endpoint:
 
 ```bash
-curl https://shakil-ai-assistant-lime.vercel.app/api/chat \
+curl https://shakil-ai-assistant.vercel.app/api/chat \
   -H "Content-Type: application/json" \
   -H "x-shakil-api-key: sk-shakil-YOUR_KEY" \
   -d '{"model":"openrouter/free","stream":false,"messages":[{"role":"user","content":"বাংলায় একটি HTML উদাহরণ দাও"}]}'
