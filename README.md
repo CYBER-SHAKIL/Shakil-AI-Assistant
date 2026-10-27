@@ -33,7 +33,7 @@ Required for image generation:
 
 Recommended:
 - `OPENROUTER_DEFAULT_MODEL=google/gemma-4-31b-it:free`
-- `APP_URL=https://shakil-ai-assistant.vercel.app`
+- `APP_URL=https://shakil-ai-assistant-lime.vercel.app`
 - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` for persistent rate limiting.
 - `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIREBASE_DATABASE_URL`, and `API_KEY_ADMIN_SECRET` for project API key management.
 - `TURNSTILE_SECRET_KEY` if Turnstile verification is enabled.
