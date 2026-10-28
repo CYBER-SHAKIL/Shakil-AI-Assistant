@@ -25,7 +25,7 @@ ${process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN ? "- ছ
 // Mode selection is removed; infer the task from each user message.
 const { getClientIp, json, parseBody, rateLimit, verifyTurnstile, requireValidKey } = require("./_lib/auth");
 
-const FORBIDDEN_SCRIPT = /[\\u4E00-\\u9FFF\\u3400-\\u4DBF\\u3040-\\u30FF\\uAC00-\\uD7AF\\u0E00-\\u0E7F\\u0900-\\u097F\\u0600-\\u06FF\\u0400-\\u04FF\\u0590-\\u05FF]/u;
+const FORBIDDEN_SCRIPT = /[\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u30FF\uAC00-\uD7AF\u0E00-\u0E7F\u0900-\u097F\u0600-\u06FF\u0400-\u04FF\u0590-\u05FF]/u;
 function containsForbiddenScript(value) { return FORBIDDEN_SCRIPT.test(String(value || "")); }
 function createFilterState(latestText) {
   const translationRequest = /(?:translate|translation|অনুবাদ)/i.test(latestText) &&
@@ -298,7 +298,7 @@ module.exports = async function handler(req, res) {
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 18000);
     const latestPromptText = typeof latestUserMessage?.content === "string" ? latestUserMessage.content : "";
-    const isCodingPrompt = /(?:\\b(code|coding|program|debug|bug|html|css|javascript|typescript|python|java|react|api|script|compile|function)\\b|কোড|প্রোগ্রাম|ওয়েবসাইট|ওয়েবসাইট|বাগ|ডিবাগ)/i.test(latestPromptText);
+    const isCodingPrompt = /(?:\b(code|coding|program|debug|bug|html|css|javascript|typescript|python|java|react|api|script|compile|function)\b|কোড|প্রোগ্রাম|ওয়েবসাইট|ওয়েবসাইট|বাগ|ডিবাগ)/i.test(latestPromptText);
     const payload = {
       model: candidate,
       messages: candidateMessages,
