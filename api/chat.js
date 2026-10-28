@@ -391,7 +391,7 @@ module.exports = async function handler(req, res) {
   try {
     const candidates = [...new Set([
       model,
-      ...(requested === FALLBACK_MODEL ? [] : [FALLBACK_MODEL]),
+      ...(model === FALLBACK_MODEL ? [] : [FALLBACK_MODEL]),
       "google/gemma-4-26b-a4b-it:free",
       "google/gemma-4-31b-it:free",
       "openrouter/free"
@@ -525,7 +525,7 @@ module.exports = async function handler(req, res) {
           catch (error) { toolFailure = error.message || "Tool follow-up failed."; break; }
         }
         if (toolFailure) lastFailure = toolFailure;
-        else if (toolResult.text.trim()) {
+        else if (responseText.trim()) {
           if (body.stream !== true) return json(res, 200, { reply: responseText || sanitizeDelta(toolResult.text, filterState), model: candidate });
           if (!res.writableEnded) { res.write("data: [DONE]\n\n"); return res.end(); }
           return;
@@ -540,7 +540,7 @@ module.exports = async function handler(req, res) {
         continue;
       }
 
-      if (firstResult.text.trim()) {
+      if (responseText.trim()) {
         if (body.stream !== true) return json(res, 200, { reply: responseText, model: candidate });
         if (!res.writableEnded) {
           res.write("data: [DONE]\n\n");
