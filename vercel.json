@@ -5,6 +5,12 @@
     },
     "api/generate-image.js": {
       "maxDuration": 60
+    },
+    "api/public/chat.js": {
+      "maxDuration": 60
+    },
+    "api/public/generate-image.js": {
+      "maxDuration": 60
     }
   }
 }
