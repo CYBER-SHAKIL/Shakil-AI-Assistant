@@ -28,7 +28,7 @@ const { getClientIp, json, parseBody, rateLimit, verifyTurnstile, requireValidKe
 function sanitizeDelta(text, state) {
   if (!state || state.disabled) return String(text || "");
   let out = "";
-  for ((const ch of String(text || "")) {
+  for (const ch of String(text || "")) {
     const cp = ch.codePointAt(0);
     if (ch === "`") state.ticks = (state.ticks || 0) + 1;
     if (state.ticks >= 3) state.inFence = !state.inFence, state.ticks = 0;
