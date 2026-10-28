@@ -146,7 +146,23 @@ let autoModelCache = { at: 0, models: [] };
 async function chooseAutoModel(messages) {
   try {
     if (Date.now() - autoModelCache.at > 300000 || !autoModelCache.models.length) {
-      const response = await fetch("https://openrouter.ai/api/v1/models", { headers: { Authorization: "Bearer " + process.env.OPENROUTER_API_KEY, "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app", "X-Title": "Shakil AI Assistant" } });
+      // Do not let model discovery stall the whole chat request and trigger a
+      // platform-level timeout (which the browser reports as a network error).
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      let response;
+      try {
+        response = await fetch("https://openrouter.ai/api/v1/models", {
+          headers: {
+            Authorization: "Bearer " + process.env.OPENROUTER_API_KEY,
+            "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-pro.vercel.app",
+            "X-Title": "Shakil AI Assistant"
+          },
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       if (!response.ok) return FALLBACK_MODEL;
       const data = await response.json();
       autoModelCache.models = (data.data || []).filter(m => m.id?.endsWith(":free") && Number(m.pricing?.prompt || 0) === 0 && Number(m.pricing?.completion || 0) === 0);
