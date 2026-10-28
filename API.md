@@ -1,6 +1,6 @@
 # Shakil AI Assistant — API নির্দেশিকা
 
-এই ডকুমেন্টে Vercel serverless API-এর route, request format, authentication, response ও troubleshooting দেওয়া হলো। Production base URL: `https://shakil-ai-assistant-lime.vercel.app`। নিজের বর্তমান Vercel production domain ভিন্ন হলে সেটি ব্যবহার করো।
+এই ডকুমেন্টে Vercel serverless API-এর route, request format, authentication, response ও troubleshooting দেওয়া হলো। Production base URL: `https://shakil-ai-assistant-pro.vercel.app`। নিজের বর্তমান Vercel production domain ভিন্ন হলে সেটি ব্যবহার করো।
 
 ## সাধারণ নিয়ম
 
@@ -196,7 +196,7 @@ Optional limits: `CHAT_RATE_LIMIT_PER_MINUTE` (20), `API_KEY_DAILY_CHAT_LIMIT` (
 Non-stream chat:
 
 ```bash
-curl https://shakil-ai-assistant-lime.vercel.app/api/chat \
+curl https://shakil-ai-assistant-pro.vercel.app/api/chat \
   -H "Content-Type: application/json" \
   -d '{"model":"openrouter/free","stream":false,"messages":[{"role":"user","content":"হ্যালো"}]}'
 ```
@@ -204,7 +204,7 @@ curl https://shakil-ai-assistant-lime.vercel.app/api/chat \
 Project API key দিয়ে chat:
 
 ```bash
-curl https://shakil-ai-assistant-lime.vercel.app/api/chat \
+curl https://shakil-ai-assistant-pro.vercel.app/api/chat \
   -H "Content-Type: application/json" \
   -H "x-shakil-api-key: sk-shakil-YOUR_KEY" \
   -d '{"model":"openrouter/free","stream":false,"messages":[{"role":"user","content":"বাংলায় উত্তর দাও"}]}'
@@ -213,7 +213,7 @@ curl https://shakil-ai-assistant-lime.vercel.app/api/chat \
 Image generation:
 
 ```bash
-curl https://shakil-ai-assistant-lime.vercel.app/api/generate-image \
+curl https://shakil-ai-assistant-pro.vercel.app/api/generate-image \
   -H "Content-Type: application/json" \
   -d '{"prompt":"A simple landscape at sunset"}'
 ```
