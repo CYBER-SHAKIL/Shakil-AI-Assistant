@@ -51,6 +51,7 @@ module.exports = async function handler(req, res) {
   const keyAuth = await requireValidKey(req);
   if (keyAuth.unavailable) return json(res, 503, { error: "API key verification is temporarily unavailable. Check Firebase configuration and try again." });
   if (keyAuth.required && !keyAuth.ok) return json(res, 401, { error: "Invalid, malformed, or revoked Shakil API key." });
+  if (!keyAuth.required && !req._shakilAllowPublicAccess) return json(res, 401, { error: "A valid Shakil API key is required. Send Authorization: Bearer sk-shakil-..." });
   if (!keyAuth.required) {
     const challenge = await verifyTurnstile(req);
     if (!challenge.ok) return json(res, 403, { error: "Cloudflare Turnstile verification failed. আবার যাচাই করে চেষ্টা করো।" });
