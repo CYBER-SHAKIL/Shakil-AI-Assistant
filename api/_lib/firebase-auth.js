@@ -24,7 +24,7 @@ async function verifyFirebaseIdToken(req) {
   }
   try {
     if (Date.now()>=certCache.until || !certCache.keys[header.kid]) {
-      const r=await fetch("https://www.googleapis.com/identitytoolkit/v3/relyingparty/publicKeys",{signal:AbortSignal.timeout(5000)});
+      const r=await fetch("https://www.googleapis.com/service_accounts/v1/metadata/x509/securetoken@system.gserviceaccount.com",{signal:AbortSignal.timeout(5000)});
       if(!r.ok) throw new Error("Firebase public keys unavailable");
       const keys=await r.json();
       const cacheControl=r.headers.get("cache-control")||"";
