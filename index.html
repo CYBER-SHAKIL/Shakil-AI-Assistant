@@ -72,6 +72,52 @@
     background: var(--surface2) !important;
   }
 }
+
+/* ChatGPT-style attachment control: icon-only round button with tap ripple */
+#attachBtn {
+  position:relative!important;
+  isolation:isolate!important;
+  overflow:hidden!important;
+  width:44px!important;
+  min-width:44px!important;
+  height:44px!important;
+  padding:0!important;
+  border-radius:50%!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:0!important;
+  background:transparent!important;
+  border:0!important;
+  color:var(--muted)!important;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+#attachBtn .tool-label { display:none!important; }
+#attachBtn svg {
+  width:24px!important;height:24px!important;flex:0 0 24px!important;
+  stroke-width:2.2!important;position:relative;z-index:1;
+  transition:transform .16s ease,color .16s ease;
+}
+#attachBtn::before {
+  content:"";position:absolute;inset:0;border-radius:50%;
+  background:var(--surface2);opacity:0;transform:scale(.25);
+  pointer-events:none;z-index:0;
+}
+#attachBtn:active::before {
+  animation:attachTapRipple .38s ease-out forwards;
+}
+#attachBtn:active svg { transform:scale(.92); }
+#attachBtn:hover { background:var(--surface2)!important;color:var(--text)!important; }
+@keyframes attachTapRipple {
+  0%{opacity:.75;transform:scale(.25)}
+  65%{opacity:.5;transform:scale(1)}
+  100%{opacity:0;transform:scale(1)}
+}
+@media(prefers-reduced-motion:reduce){
+ #attachBtn::before{animation:none!important}
+ #attachBtn svg{transition:none!important}
+}
 </style><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css"><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script><script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script></head>
 <body>
 <noscript><div style="padding:16px;background:#151925;color:#f5f7ff;font:14px/1.5 system-ui">Shakil AI Assistant needs JavaScript enabled to run. Enable JavaScript in your browser and reload this page.</div></noscript>
