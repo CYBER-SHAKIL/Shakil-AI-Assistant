@@ -59,11 +59,15 @@ async function db(path, method="GET", value) {
   return data;
 }
 async function verifyShakilApiKey(key) {
-  if (typeof key !== "string" || !/^sk-shakil-[A-Za-z0-9_-]{32,}$/.test(key)) return false;
+  // 32 random bytes encoded as base64url always produce 43 characters.
+  if (typeof key !== "string" || !/^sk-shakil-[A-Za-z0-9_-]{43}$/.test(key)) return false;
   const hash = crypto.createHash("sha256").update(key).digest("hex");
-  try {
-    const record = await db("shakilApiKeys/"+hash);
-    return !!record && record.revoked !== true;
-  } catch { return false; }
+  // Let Firebase/configuration failures propagate so callers can return 503,
+  // rather than incorrectly reporting an infrastructure outage as a bad key.
+  const record = await db("shakilApiKeys/" + hash);
+  if (!record || record.revoked === true) return false;
+  const storedId = Buffer.from(hash, "hex");
+  const expectedId = Buffer.from(hash, "hex");
+  return storedId.length === expectedId.length && crypto.timingSafeEqual(storedId, expectedId);
 }
 module.exports = { accessToken, db, verifyShakilApiKey };
