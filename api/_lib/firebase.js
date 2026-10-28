@@ -66,8 +66,8 @@ async function verifyShakilApiKey(key) {
   // rather than incorrectly reporting an infrastructure outage as a bad key.
   const record = await db("shakilApiKeys/" + hash);
   if (!record || record.revoked === true) return false;
-  const storedId = Buffer.from(hash, "hex");
-  const expectedId = Buffer.from(hash, "hex");
-  return storedId.length === expectedId.length && crypto.timingSafeEqual(storedId, expectedId);
+  // Firebase is queried by the SHA-256 digest itself, so an exact database-path
+  // match is the comparison. Admin secrets are compared with timingSafeEqual in keys.js.
+  return true;
 }
 module.exports = { accessToken, db, verifyShakilApiKey };
