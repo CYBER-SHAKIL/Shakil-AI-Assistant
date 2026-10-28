@@ -306,6 +306,8 @@ module.exports = async function handler(req, res) {
 
   let clientDisconnected = false;
   let activeController = null;
+  // Leave a safety margin below Vercel's 60-second function deadline.
+  const requestDeadline = Date.now() + 50000;
   res.on("close", () => {
     if (!res.writableEnded) {
       clientDisconnected = true;
@@ -317,7 +319,14 @@ module.exports = async function handler(req, res) {
     const controller = new AbortController();
     activeController = controller;
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 18000);
+    const remainingMs = requestDeadline - Date.now();
+    if (remainingMs <= 0) {
+      const error = new Error("মোট অনুরোধের সময়সীমা শেষ হয়েছে।");
+      error.code = "REQUEST_DEADLINE";
+      throw error;
+    }
+    const modelTimeoutMs = Math.min(18000, remainingMs);
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, modelTimeoutMs);
     const latestPromptText = typeof latestUserMessage?.content === "string" ? latestUserMessage.content : "";
     const isCodingPrompt = /(?:\b(code|coding|program|debug|bug|html|css|javascript|typescript|python|java|react|api|script|compile|function)\b|কোড|প্রোগ্রাম|ওয়েবসাইট|ওয়েবসাইট|বাগ|ডিবাগ)/i.test(latestPromptText);
     const payload = {
@@ -454,6 +463,10 @@ module.exports = async function handler(req, res) {
     const filterEnabled = !containsForbiddenScript(latestPrompt) && !hasTranslationException(latestPrompt);
     for (const candidate of candidates) {
       if (clientDisconnected) return;
+      if (Date.now() >= requestDeadline) {
+        lastFailure = "মোট অনুরোধের সময়সীমা শেষ হয়েছে; নতুন মডেল চেষ্টা করা হয়নি।";
+        break;
+      }
       chosenModel = candidate;
       responseText = "";
       const filterState = createFilterState(latestPrompt);

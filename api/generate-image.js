@@ -25,7 +25,7 @@ async function enhancePrompt(input) {
       temperature: 0.4,
       max_tokens: 350
     }),
-    signal: AbortSignal.timeout(12000)
+    signal: AbortSignal.timeout(8000)
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error("PROMPT_ENHANCEMENT_FAILED");
@@ -36,7 +36,10 @@ async function enhancePrompt(input) {
 
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const allowedOrigin = (() => { try { return process.env.APP_URL ? new URL(process.env.APP_URL).origin : ""; } catch { return ""; } })();
+  const requestOrigin = req.headers.origin || "";
+  if (allowedOrigin && requestOrigin === allowedOrigin) res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+  res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Shakil-Api-Key, X-Turnstile-Token");
   if (req.method === "OPTIONS") { res.statusCode = 204; return res.end(); }
@@ -72,11 +75,11 @@ module.exports = async function handler(req, res) {
   if (!accountId || !cfToken) return json(res, 503, { error: "Cloudflare Workers AI configure করা হয়নি। Vercel-এ CLOUDFLARE_ACCOUNT_ID ও CLOUDFLARE_API_TOKEN যোগ করতে হবে।" });
 
   try {
-    let enhanced;
-    try { enhanced = await enhancePrompt(prompt); }
-    catch (error) {
-      if (error.message === "OPENROUTER_NOT_CONFIGURED") return json(res, 503, { error: "Prompt enhancement-এর জন্য OPENROUTER_API_KEY configure করতে হবে।" });
-      enhanced = prompt;
+    let enhanced = prompt;
+    // English/ASCII prompts go straight to Cloudflare and do not consume OpenRouter quota.
+    if (/[^\x00-\x7F]/u.test(prompt) && process.env.OPENROUTER_API_KEY) {
+      try { enhanced = await enhancePrompt(prompt); }
+      catch { enhanced = prompt; }
     }
     const upstream = await fetch("https://api.cloudflare.com/client/v4/accounts/" + encodeURIComponent(accountId) + "/ai/run/" + IMAGE_MODEL, {
       method: "POST",

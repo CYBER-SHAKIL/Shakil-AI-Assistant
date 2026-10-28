@@ -33,34 +33,42 @@ function parseBody(req, limit=BODY_LIMIT) {
 async function rateLimit(key, limit, windowSeconds) {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  const safeKey = "shakil:rl:" + crypto.createHash("sha256").update(String(key)).digest("hex");
+  const bucketSeconds = Math.max(1, Number(windowSeconds) || 60);
+  const bucket = Math.floor(Date.now() / (bucketSeconds * 1000));
+  const bucketedKey = String(key) + ":bucket:" + bucket;
+  const safeKey = "shakil:rl:" + crypto.createHash("sha256").update(bucketedKey).digest("hex");
   if (url && token) {
     try {
-      const response = await fetch(url.replace(/\/$/,""), {
-        method:"POST", headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},
-        body:JSON.stringify(["INCR",safeKey])
-      });
-      if (!response.ok) throw new Error("Redis INCR failed");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      let response;
+      try {
+        response = await fetch(url.replace(/\/$/, "") + "/pipeline", {
+          method: "POST",
+          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify([["INCR", safeKey], ["EXPIRE", safeKey, bucketSeconds + 5]]),
+          signal: controller.signal
+        });
+      } finally { clearTimeout(timer); }
+      if (!response.ok) throw new Error("Upstash pipeline failed");
       const data = await response.json();
-      const count = Number(data.result);
+      if (!Array.isArray(data) || data.length < 2 || data[0]?.error || data[1]?.error) throw new Error("Invalid Upstash pipeline response");
+      const count = Number(data[0]?.result);
       if (!Number.isFinite(count)) throw new Error("Invalid Redis count");
-      if (count === 1) {
-        await fetch(url.replace(/\/$/,""), {method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify(["EXPIRE",safeKey,windowSeconds])});
-      }
-      return {limited:count>limit, count, persistent:true};
+      return { limited: count > limit, count, persistent: true };
     } catch (error) {
-      console.error("Upstash rate limit unavailable; using local fallback:", error?.message || error);
+      console.error("Upstash rate limit unavailable; using local fallback:", error?.name === "AbortError" ? "request timed out after 4 seconds" : (error?.message || error));
     }
   }
   const now = Date.now();
   let item = localWindows.get(safeKey);
-  if (!item || now >= item.until) item = {count:0,until:now+windowSeconds*1000};
+  if (!item || now >= item.until) item = { count: 0, until: (bucket + 1) * bucketSeconds * 1000 };
   item.count++;
-  localWindows.set(safeKey,item);
+  localWindows.set(safeKey, item);
   if (localWindows.size > 5000) {
-    for (const [k,v] of localWindows) if (now >= v.until) localWindows.delete(k);
+    for (const [k, v] of localWindows) if (now >= v.until) localWindows.delete(k);
   }
-  return {limited:item.count>limit,count:item.count,persistent:false};
+  return { limited: item.count > limit, count: item.count, persistent: false };
 }
 async function verifyTurnstile(req) {
   const secret = process.env.TURNSTILE_SECRET_KEY;
