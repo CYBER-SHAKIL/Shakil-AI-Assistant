@@ -1,103 +1,235 @@
-# Shakil AI Assistant — API Setup
+# Shakil AI Assistant — API নির্দেশিকা
 
-The chat backend uses **OpenRouter**. The OpenRouter key must stay on Vercel and must never be added to `index.html`, browser storage, or GitHub.
+এই ডকুমেন্টে Vercel serverless API-এর route, request format, authentication, response ও troubleshooting দেওয়া হলো। Production base URL: `https://shakil-ai-assistant-lime.vercel.app`। নিজের বর্তমান Vercel production domain ভিন্ন হলে সেটি ব্যবহার করো।
 
-## 1. Add the OpenRouter key in Vercel
+## সাধারণ নিয়ম
 
-1. Open the [Vercel project](https://vercel.com/cyber-shakils-projects/shakil-ai-assistant).
-2. Go to **Settings → Environment Variables**.
-3. Add:
-   - **Key:** `OPENROUTER_API_KEY`
-   - **Value:** your OpenRouter API key (starts with `sk-or-v1-`)
-   - **Environments:** Production, Preview, and Development.
-4. Save the variable, then go to **Deployments** and redeploy the latest production deployment (or push a new commit).
+- JSON request-এর জন্য `Content-Type: application/json` পাঠাও।
+- Provider secret (`OPENROUTER_API_KEY`, Cloudflare token, Tavily key, Firebase service-account JSON) browser থেকে পাঠানোর দরকার নেই এবং এগুলো কখনো public client-এ রেখো না।
+- Project API key থাকলে `x-shakil-api-key: sk-shakil-...` header অথবা `Authorization: Bearer sk-shakil-...` ব্যবহার করো।
+- Project API key না দিলে public chat/image endpoint-এর request Turnstile check-এর মধ্য দিয়ে যেতে পারে। `TURNSTILE_SECRET_KEY` সেট না থাকলে server verification সক্রিয় থাকে না।
+- JSON error response সাধারণত `{ "error": "..." }` ফরম্যাটে আসে।
+- Body ভুল JSON হলে `400`; body limit ছাড়ালে `413`; rate limit ছাড়ালে `429` হতে পারে।
 
-Do not send your key in chat or commit it to GitHub.
+## 1. `POST /api/chat`
 
-Optional:
-- `TAVILY_API_KEY` — server-only Tavily Search API key. Without it, live search is unavailable but ordinary chat continues.
-- `WEB_SEARCH_DAILY_GLOBAL_LIMIT=1000` — optional deployment-wide daily search cap (shared when Upstash Redis is configured).
-- `WEB_SEARCH_DAILY_IP_LIMIT=20` — optional per-IP daily search cap.
-- `WEB_SEARCH_DAILY_KEY_LIMIT=100` — optional per-project-API-key daily search cap.
-- `OPENROUTER_DEFAULT_MODEL=google/gemma-4-31b-it:free`
-- `APP_URL=https://shakil-ai-assistant-lime.vercel.app`
+Text chat, code help, streamed output, সীমিত arithmetic calculator এবং `TAVILY_API_KEY` থাকলে web search।
 
-The site and server default to `google/gemma-4-31b-it:free`. Settings also lets users select `openrouter/free` for automatic free-model routing. The server accepts free model IDs ending in `:free` plus `openrouter/free`; fallback candidates include `openrouter/free`.
-
-## 2. Chat, coding, and image understanding
-
-- `POST /api/chat` — text chat, coding help, streaming responses, calculator calls, optional Tavily web search, and attached-image understanding when the selected model supports image input.
-- `GET /api/models` — retrieves the currently available free OpenRouter models and their image-input capability.
-
-Example request:
+### Request body
 
 ```json
 {
-  "model": "google/gemma-4-31b-it:free",
-  "stream": true,
+  "model": "openrouter/free",
+  "stream": false,
   "messages": [
-    { "role": "user", "content": "তোমার developer কে?" }
+    { "role": "user", "content": "বাংলায় একটি HTML উদাহরণ দাও" }
   ]
 }
 ```
 
-The browser sends attached images as multimodal `image_url` content to `/api/chat`. Choose a model marked as supporting image input for image questions. Availability and free limits can change on OpenRouter.
+- `model`: `openrouter/free` অথবা `:free` দিয়ে শেষ হওয়া free model ID। বাদ দিলে Auto route ব্যবহার হয়।
+- `stream`: `false` বা বাদ দিলে JSON response; `true` দিলে Server-Sent Events (SSE)।
+- `messages`: non-empty array; শুধু `user` ও `assistant` role অনুমোদিত। `system` role পাঠানো যাবে না।
+- সর্বশেষ 30টি message process করা হয়। একটি text message সর্বোচ্চ 12,000 অক্ষর।
+- Image input-এর জন্য `content` একটি text/image part array হতে পারে; image URL অবশ্যই base64 `data:image/png`, `jpeg`, `webp` বা `gif` URL হতে হবে। সব image মিলে সর্বোচ্চ 2.5 MB। নির্বাচিত model-কে image input সমর্থন করতে হবে।
 
-When configured, the backend can call Tavily for current or changing information. Search is optional and uses the server-side `TAVILY_API_KEY`; the key is never sent to the browser. Results are limited to five short title/URL/snippet entries, search usage is capped per IP and project API key, and the model is instructed to treat search snippets as untrusted content and cite useful URLs in a `সূত্র:` section. The backend allows at most two tool rounds per chat request. If Tavily is not configured, normal chat continues and the assistant is told live search is unavailable.
+### JSON response (stream=false)
 
-## 3. Image generation with Cloudflare Workers AI
+```json
+{
+  "reply": "এখানে AI-এর উত্তর",
+  "model": "ব্যবহৃত model ID"
+}
+```
 
-Image generation uses Cloudflare Workers AI model `@cf/black-forest-labs/flux-1-schnell` through `POST /api/generate-image`. Bengali prompts are optionally enhanced into a detailed English prompt with the server-side OpenRouter key. The browser never receives either provider key.
+সাধারণ greeting-এর জন্য backend `model: "greeting"`-সহ JSON দিতে পারে।
 
-Add these server-only variables in Vercel → Settings → Environment Variables:
-- `CLOUDFLARE_ACCOUNT_ID` — your Cloudflare account ID.
-- `CLOUDFLARE_API_TOKEN` — a Cloudflare API token with Workers AI permission.
-- `OPENROUTER_API_KEY` — also used for text chat and prompt enhancement.
+### Streaming response (stream=true)
 
-Redeploy after saving environment variables. Cloudflare Workers AI usage and limits depend on your Cloudflare account; do not assume unlimited free generation.
+Response content type `text/event-stream`। প্রতিটি event-এর data-তে OpenAI-style chunk থাকে, যেমন:
 
-Use an explicit command such as `/image বাংলার নদীর ধারে সূর্যাস্ত, cinematic lighting` to generate an image. HTML, SVG, and code requests remain normal chat requests. Image-to-image generation using an uploaded reference image is not supported yet; remove attachments when using `/image`.
+```text
+data: {"choices":[{"delta":{"content":"হ্যালো"}}]}
 
-## 4. Security and limitations
+data: [DONE]
+```
 
-- Never put API keys in public HTML or frontend JavaScript.
-- Rate limits use Upstash Redis when `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are configured; otherwise the fallback is per-instance in-memory and is not globally persistent.
-- Public endpoints can be abused; monitor OpenRouter usage and limits.
-- Free model availability, vision support, context limits, and routing behavior may change.
+Client-কে SSE event পড়তে হবে এবং `data: [DONE]` এলে stream শেষ করতে হবে। Stream শুরু হওয়ার পর upstream error হলে HTTP status ইতিমধ্যে 200 হয়ে থাকতে পারে; তাই client-কে stream-এর error event/শেষ হওয়া যাচাই করতে হবে।
 
-## 5. Assistant modes and safe tool calling
+### Rate limit ও error
 
-- **Chat mode:** Bengali-first conversation and coding help.
-- **Automatic task detection:** the assistant infers whether a request needs coding help, study explanations, image understanding, or web search; there are no separate mode buttons.
-- **Image understanding:** attach an image and select a free model marked “Image input”; `openrouter/free` can route to a model supporting image input.
-- **Tool calling:** the chat backend exposes a limited arithmetic calculator and optional Tavily `web_search` function. It parses basic arithmetic directly and does not run arbitrary JavaScript, shell commands, or external actions. If a model rejects a tool schema with a compatible 400/422 error, the backend retries that model once without tools.
-- **Send button:** green 3D-style button with pressed-state feedback.
+- Default: প্রতি IP-তে 20 request/minute (`CHAT_RATE_LIMIT_PER_MINUTE`)।
+- Project API key ব্যবহার করলে default 500 chat request/day (`API_KEY_DAILY_CHAT_LIMIT`)।
+- Invalid/revoked key: `401`।
+- Turnstile configured থাকলে verification failure: `403`।
+- Rate limit: `429`।
+- OpenRouter key অনুপস্থিত: `503`।
+- Model/provider failure: upstream failure অনুযায়ী error হতে পারে; fallback model চেষ্টা করা হয়।
 
-## 6. Verification notes
+## 2. `GET /api/models`
 
-Syntax checks do not replace end-to-end tests. Live chat and model discovery require `OPENROUTER_API_KEY` in Vercel. The UI and server default model are both `google/gemma-4-31b-it:free`; the Settings list includes the default once and offers `openrouter/free` for automatic free-model routing.
+OpenRouter থেকে পাওয়া free chat model তালিকা এবং vision capability দেয়। এই route-এর জন্য server-side `OPENROUTER_API_KEY` প্রয়োজন।
 
+Example:
 
-## Firebase-backed project API keys
+```json
+{
+  "models": [
+    {
+      "id": "openrouter/free",
+      "name": "OpenRouter Free Router",
+      "vision": true,
+      "contextLength": null
+    }
+  ]
+}
+```
 
-The Settings panel includes a project API key manager. It is intentionally disabled until these server-only Vercel environment variables are configured:
+প্রতিটি model object-এ `id`, `name`, `vision`, `contextLength` থাকতে পারে। প্রকৃত তালিকা OpenRouter-এর availability অনুসারে পরিবর্তিত হয়; উপরের object কেবল format-এর উদাহরণ। Cache header প্রায় 5 মিনিটের জন্য response cache করতে পারে।
 
-- `FIREBASE_SERVICE_ACCOUNT_JSON`: the **newly rotated** Firebase service-account JSON, pasted as one JSON value in Vercel only.
-- `FIREBASE_DATABASE_URL`: `https://shakil-dev-pro-default-rtdb.asia-southeast1.firebasedatabase.app`
-- `API_KEY_ADMIN_SECRET`: a long, random admin secret used only to create, list, and revoke project API keys.
-- `OPENROUTER_API_KEY`: the server-side OpenRouter key already required for chat.
+- `405`: GET ছাড়া অন্য method।
+- `503`: `OPENROUTER_API_KEY` configure করা নেই।
+- `502`: upstream model list পাওয়া যায়নি।
 
-**Important:** the service-account private key shared in chat is compromised. Revoke it in Google Cloud Console and create a new key before setting `FIREBASE_SERVICE_ACCOUNT_JSON`. Never put the service-account JSON or admin secret in this repository or the browser. The public Firebase web config is not a replacement for the service-account credential.
+## 3. `POST /api/generate-image`
 
-In Settings, enter the admin secret and create a project key. The raw key is shown only once; copy it securely. The database stores a SHA-256 hash and metadata, not the raw key. Revoke a key in Settings to disable it.
+Cloudflare Workers AI model `@cf/black-forest-labs/flux-1-schnell` দিয়ে text-to-image generation।
 
-External project requests use the same chat endpoint:
+### Request
+
+```json
+{
+  "prompt": "A peaceful river in Bangladesh at sunset, cinematic lighting"
+}
+```
+
+- `prompt` আবশ্যক; সর্বোচ্চ 1,000 অক্ষর।
+- `referenceImages` দিয়ে image-to-image generation এখনো সমর্থিত নয়; পাঠালে `400` আসবে।
+- প্রয়োজনীয় server variables: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`। `OPENROUTER_API_KEY` থাকলে non-ASCII prompt-এর enhancement চেষ্টা করা হয়; enhancement ব্যর্থ হলে মূল prompt ব্যবহার হয়।
+
+### সফল response
+
+```json
+{
+  "imageBase64": "BASE64_IMAGE_DATA",
+  "mimeType": "image/jpeg",
+  "caption": "তোমার তৈরি করা ছবি"
+}
+```
+
+Client-কে `imageBase64` ও `mimeType` দিয়ে image দেখাতে হবে।
+
+### Limit
+
+- প্রতি IP-তে default 5 image/day: `IMAGE_DAILY_LIMIT_PER_IP`
+- প্রতি project API key-তে default 20 image/day: `IMAGE_DAILY_LIMIT_PER_KEY`
+- সব request মিলিয়ে default 100 image/day: `IMAGE_GLOBAL_DAILY_LIMIT`
+
+Configuration অনুপস্থিত হলে `503`; provider response failure বা connection failure হলে সাধারণত `502`; limit ছাড়ালে `429`।
+
+## 4. `POST /api/keys`
+
+Firebase Realtime Database-এ project API key তৈরি, তালিকা দেখা এবং revoke করা। এই route ব্যবহার করতে `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIREBASE_DATABASE_URL` এবং `API_KEY_ADMIN_SECRET` configure করতে হবে।
+
+**Request-এ `adminSecret` পাঠানো হয়। এটি private admin secret—কখনো frontend source, public repository বা public chat-এ রেখো না।**
+
+### Create
+
+```json
+{
+  "adminSecret": "YOUR_PRIVATE_ADMIN_SECRET",
+  "action": "create",
+  "label": "My project"
+}
+```
+
+সফল response-এ `key`, `record`, `warning` থাকে। Raw key একবারই দেখানো হয়; সঙ্গে সঙ্গে নিরাপদ জায়গায় কপি করো। Database-এ raw key নয়, SHA-256 hash ও metadata রাখা হয়।
+
+### List
+
+```json
+{
+  "adminSecret": "YOUR_PRIVATE_ADMIN_SECRET",
+  "action": "list"
+}
+```
+
+Response-এ `keys` array থাকে। তালিকায় key metadata ও record ID থাকে, raw key নয়।
+
+### Revoke
+
+```json
+{
+  "adminSecret": "YOUR_PRIVATE_ADMIN_SECRET",
+  "action": "revoke",
+  "id": "64-character-lowercase-hex-record-id"
+}
+```
+
+সফল হলে `{ "ok": true }` ফেরত আসে। Revoke করার পর key আর valid হওয়া উচিত নয়।
+
+- শুধু POST অনুমোদিত; অন্য method-এ `405`।
+- ভুল admin secret: `401`।
+- 10 মিনিটে IP-প্রতি 10 ভুল/অতিরিক্ত attempt-এর পরে `429`।
+- Firebase/env সমস্যা হলে `503`।
+
+## 5. Environment variables
+
+Vercel → Project → Settings → Environment Variables-এ server-side values যোগ করে redeploy করো।
+
+| Variable | কোন কাজে লাগে |
+| --- | --- |
+| `OPENROUTER_API_KEY` | Chat ও model discovery; optional prompt enhancement |
+| `APP_URL` | Canonical app origin ও CORS |
+| `CLOUDFLARE_ACCOUNT_ID` | Image generation |
+| `CLOUDFLARE_API_TOKEN` | Workers AI access |
+| `TAVILY_API_KEY` | Optional live web search |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Persistent rate limiting |
+| `TURNSTILE_SECRET_KEY` | Optional server-side Turnstile verification |
+| `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIREBASE_DATABASE_URL` | Firebase-backed project key manager |
+| `API_KEY_ADMIN_SECRET` | Project key manager admin authorization |
+
+Optional limits: `CHAT_RATE_LIMIT_PER_MINUTE` (20), `API_KEY_DAILY_CHAT_LIMIT` (500), `IMAGE_DAILY_LIMIT_PER_IP` (5), `IMAGE_DAILY_LIMIT_PER_KEY` (20), `IMAGE_GLOBAL_DAILY_LIMIT` (100), `WEB_SEARCH_DAILY_GLOBAL_LIMIT` (1000), `WEB_SEARCH_DAILY_IP_LIMIT` (20), `WEB_SEARCH_DAILY_KEY_LIMIT` (100)। প্রতিটি value code-এর default override করে।
+
+## 6. cURL উদাহরণ
+
+Non-stream chat:
+
+```bash
+curl https://shakil-ai-assistant-lime.vercel.app/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"model":"openrouter/free","stream":false,"messages":[{"role":"user","content":"হ্যালো"}]}'
+```
+
+Project API key দিয়ে chat:
 
 ```bash
 curl https://shakil-ai-assistant-lime.vercel.app/api/chat \
   -H "Content-Type: application/json" \
   -H "x-shakil-api-key: sk-shakil-YOUR_KEY" \
-  -d '{"model":"openrouter/free","stream":false,"messages":[{"role":"user","content":"বাংলায় একটি HTML উদাহরণ দাও"}]}'
+  -d '{"model":"openrouter/free","stream":false,"messages":[{"role":"user","content":"বাংলায় উত্তর দাও"}]}'
 ```
 
-The response is JSON when `stream` is false. Set `stream` to true for server-sent events. For image generation, POST to `/api/generate-image` with `x-shakil-api-key` and JSON like `{"prompt":"A sunset over a river"}`. The server uses Cloudflare Workers AI; no image model selector is sent from the browser. Keep project keys on the server side of your own apps; do not ship them in public browser JavaScript.
+Image generation:
+
+```bash
+curl https://shakil-ai-assistant-lime.vercel.app/api/generate-image \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"A simple landscape at sunset"}'
+```
+
+Public endpoints-এর request limit এবং provider-এর account limits প্রযোজ্য। নিজের project key তৈরি করে ব্যবহার করলে request-এ সেটি header হিসেবে পাঠাও।
+
+## 7. Troubleshooting
+
+- **Chat-এ 503:** Vercel-এ `OPENROUTER_API_KEY` আছে কি না এবং সঠিক environment (Production/Preview/Development) নির্বাচন করা হয়েছে কি না দেখো; তারপর redeploy করো।
+- **Model list empty/502:** OpenRouter key ও upstream service পরীক্ষা করো। Free model availability পরিবর্তিত হতে পারে।
+- **Image generation 503:** `CLOUDFLARE_ACCOUNT_ID` ও `CLOUDFLARE_API_TOKEN` আছে কি না দেখো।
+- **Image generation 502:** Cloudflare Workers AI permission, account usage/limits এবং token status পরীক্ষা করো।
+- **401 invalid project key:** key revoke হয়েছে কি না, header format ঠিক কি না এবং Firebase configuration সচল কি না দেখো।
+- **API key manager 503:** নতুন/valid `FIREBASE_SERVICE_ACCOUNT_JSON`, সঠিক `FIREBASE_DATABASE_URL`, এবং `API_KEY_ADMIN_SECRET` configure করে redeploy করো।
+- **429:** দৈনিক বা মিনিটভিত্তিক limit শেষ; সময়/limit reset না হওয়া পর্যন্ত অপেক্ষা করো।
+- **Rate limit persistent নয়:** `UPSTASH_REDIS_REST_URL` ও `UPSTASH_REDIS_REST_TOKEN` configure করো।
+- **CORS:** browser request-এর origin `APP_URL`-এর origin-এর সঙ্গে মিলতে হবে; `APP_URL` পরিবর্তন করলে redeploy করো।
+
+API syntax ও documentation উদাহরণ end-to-end provider connectivity নিশ্চিত করে না। Production endpoint নিজে পরীক্ষা করো এবং Vercel logs-এ error দেখো—secret value log বা share করবে না।
