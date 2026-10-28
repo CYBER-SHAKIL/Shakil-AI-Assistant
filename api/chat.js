@@ -86,11 +86,11 @@ function ensureGreetingFirstLine(text, greetingText) {
   const greetingPrefix = /আসসালামু|assalamu/i.test(greetingText) ? "ওয়ালাইকুম আসসালাম! আমি Shakil AI Assistant 😊" :
     /হ্যালো|হেলো|hello/i.test(greetingText) ? "হ্যালো! আমি Shakil AI Assistant 😊" :
     "হাই! আমি Shakil AI Assistant 😊";
-  if (/Shakil AI Assistant/i.test(firstLine) && /^(হাই|হ্যালো|হেলো|ওয়ালাইকুম|hello|hi|hey)/i.test(firstLine)) return value;
+  if (/Shakil AI Assistant/i.test(firstLine) && /^(হাই|হ্যালো|হেলো|ওয়ালাইকুম)/i.test(firstLine)) return value;
   if (/Shakil AI Assistant/i.test(firstLine)) {
     return greetingPrefix + (lines.length > 1 ? "\n" + lines.slice(1).join("\n") : "");
   }
-  if (/^(হাই|হ্যালো|হেলো|ওয়ালাইকুম|আসসালামু|hello|hi|hey)/i.test(firstLine)) {
+  if (/^(হাই|হ্যালো|হেলো|ওয়ালাইকুম|আসসালামু)/i.test(firstLine)) {
     lines[0] = firstLine.replace(/[.!?।\s]+$/, "") + " — আমি Shakil AI Assistant 😊";
     return lines.join("\n");
   }
