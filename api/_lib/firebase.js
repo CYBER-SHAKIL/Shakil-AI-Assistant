@@ -65,9 +65,9 @@ async function verifyShakilApiKey(key) {
   // Let Firebase/configuration failures propagate so callers can return 503,
   // rather than incorrectly reporting an infrastructure outage as a bad key.
   const record = await db("shakilApiKeys/" + hash);
-  if (!record || record.revoked === true) return false;
-  // Firebase is queried by the SHA-256 digest itself, so an exact database-path
-  // match is the comparison. Admin secrets are compared with timingSafeEqual in keys.js.
+  if (!record || record.revoked !== false || typeof record.createdAt !== "string" || typeof record.prefix !== "string") return false;
+  // Firebase is queried by the SHA-256 digest itself, so the record is only found
+  // at the exact digest path. Admin secrets use timingSafeEqual in keys.js.
   return true;
 }
 module.exports = { accessToken, db, verifyShakilApiKey };
