@@ -93,7 +93,7 @@ async function chooseAutoModel(messages) {
       if (hasImage) return vision ? 100 : -1000;
       if (coding) return /coder|codestral|starcoder|devstral/.test(id) ? 90 : /qwen|deepseek|gemma/.test(id) ? 35 : 0;
       if (reasoning) return /deepseek-r1|qwq|reason|qwen3|gemma-4/.test(id) ? 75 : /llama|mistral/.test(id) ? 20 : 0;
-      return /gemma-4|qwen3|llama-4|mistral-small/.test(id) ? 55 : /qwen|gemma|llama/.test(id) ? 30 : 0;
+      return /gemma-4|llama-4|mistral-small/.test(id) ? 65 : /gemma|llama|mistral/.test(id) ? 40 : 0;
     };
     const best = autoModelCache.models.map(model => ({ model, score: score(model) })).filter(x => x.score > 0).sort((a,b) => b.score-a.score)[0];
     return best?.model?.id || FALLBACK_MODEL;
