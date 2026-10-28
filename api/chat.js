@@ -25,6 +25,22 @@ ${process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN ? "- ছ
 // Mode selection is removed; infer the task from each user message.
 const { getClientIp, json, parseBody, rateLimit, verifyTurnstile, requireValidKey } = require("./_lib/auth");
 
+function sanitizeDelta(text, state) {
+  if (!state || state.disabled) return String(text || "");
+  let out = "";
+  for ((const ch of String(text || "")) {
+    const cp = ch.codePointAt(0);
+    if (ch === "`") state.ticks = (state.ticks || 0) + 1;
+    if (state.ticks >= 3) state.inFence = !state.inFence, state.ticks = 0;
+    const forbidden = (cp >= 0x4e00 && cp <= 0x9fff) || (cp >= 0x3400 && cp <= 0x4dbf) ||
+      (cp >= 0x3040 && cp <= 0x30ff) || (cp >= 0xac00 && cp <= 0xd7af) ||
+      (cp >= 0x0e00 && cp <= 0x0e7f) || (cp >= 0x0900 && cp <= 0x097f) ||
+      (cp >= 0x0600 && cp <= 0x06ff) || (cp >= 0x0400 && cp <= 0x04ff) ||
+      (cp >= 0x0590 && cp <= 0x05ff);
+    out += forbidden && !state.inFence ? "" : ch;
+  }
+  return out;
+}
 function respondText(req, res, text) {
   if (req.body?.stream !== true) return json(res, 200, { reply: text, model: "greeting" });
   res.statusCode = 200;
@@ -160,7 +176,7 @@ module.exports = async function handler(req, res) {
     const keyLimit = await rateLimit("chat:key:" + String(req.headers["x-shakil-api-key"] || req.headers.authorization || "").trim(), Number(process.env.API_KEY_DAILY_CHAT_LIMIT) || 500, 86400);
     if (keyLimit.limited) return json(res, 429, { error: "এই API key-এর দৈনিক chat limit শেষ হয়েছে।" });
   }
-  if (!Array.isArray(body.messages) || body.messages.length === 0 || body.messages.length > 40) return json(res, 400, { error: "messages must be a non-empty array with at most 40 items." });
+  if (!Array.isArray(body.messages) || body.messages.length === 0 || body.messages.length > 500) return json(res, 400, { error: "messages must be a non-empty array with at most 500 items." });
   const messages = [];
   let imageBytes = 0;
   for (const item of body.messages.slice(-30)) {
