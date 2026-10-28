@@ -150,9 +150,9 @@ async function chooseAutoModel(messages) {
       // platform-level timeout (which the browser reports as a network error).
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4000);
-      let response;
+      let data;
       try {
-        response = await fetch("https://openrouter.ai/api/v1/models", {
+        const response = await fetch("https://openrouter.ai/api/v1/models", {
           headers: {
             Authorization: "Bearer " + process.env.OPENROUTER_API_KEY,
             "HTTP-Referer": process.env.APP_URL || "https://shakil-ai-assistant-pro.vercel.app",
@@ -160,11 +160,11 @@ async function chooseAutoModel(messages) {
           },
           signal: controller.signal
         });
+        if (!response.ok) return FALLBACK_MODEL;
+        data = await response.json();
       } finally {
         clearTimeout(timer);
       }
-      if (!response.ok) return FALLBACK_MODEL;
-      const data = await response.json();
       autoModelCache.models = (data.data || []).filter(m => m.id?.endsWith(":free") && Number(m.pricing?.prompt || 0) === 0 && Number(m.pricing?.completion || 0) === 0);
       autoModelCache.at = Date.now();
     }
