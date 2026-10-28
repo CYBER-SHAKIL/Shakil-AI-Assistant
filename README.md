@@ -12,7 +12,7 @@ There are two route groups:
 
 API keys use the `sk-shakil-` prefix and 32 cryptographically random bytes. Only the SHA-256 digest and non-secret metadata are stored in Firebase Realtime Database. The raw key is returned only by the create action and cannot be recovered later. Revoke a compromised key immediately.
 
-There is intentionally no browser-based admin form: the admin secret must not be embedded in frontend JavaScript. Use a trusted server-side script or an HTTPS API client to manage keys. The create response contains the new key once; copy it into your secret manager before closing the response.
+There is intentionally no browser-based admin form: the Firebase Authentication must not be embedded in frontend JavaScript. Use a trusted server-side script or an HTTPS API client to manage keys. The create response contains the new key once; copy it into your secret manager before closing the response.
 
 ## Vercel environment variables
 
@@ -22,7 +22,7 @@ In Vercel Dashboard → Project → **Settings → Environment Variables**, add 
 | --- | --- | --- |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | Key create/list/revoke and API-key verification | Full service-account JSON, server-only. Must include `client_email` and `private_key`. |
 | `FIREBASE_DATABASE_URL` | Key create/list/revoke and API-key verification | Realtime Database URL, e.g. `https://PROJECT-default-rtdb.firebaseio.com` or a `.firebasedatabase.app` URL. |
-| `API_KEY_ADMIN_SECRET` | Key create/list/revoke | Strong private admin secret. Never place it in `index.html`, browser storage, or public repositories. |
+| `(removed; use Firebase Authentication)` | Key create/list/revoke | Strong private Firebase Authentication. Never place it in `index.html`, browser storage, or public repositories. |
 | `OPENROUTER_API_KEY` | Chat and model discovery | Provider secret; server-side only. |
 | `CLOUDFLARE_ACCOUNT_ID` | Image generation | Cloudflare account ID. |
 | `CLOUDFLARE_API_TOKEN` | Image generation | Workers AI permissions required; server-side only. |
@@ -39,7 +39,7 @@ Optional limit overrides: `CHAT_RATE_LIMIT_PER_MINUTE` (20), `API_KEY_DAILY_CHAT
 1. In Google/Firebase console, create or select a service account with permission to access the project's Realtime Database.
 2. Store the entire service-account JSON as `FIREBASE_SERVICE_ACCOUNT_JSON` in Vercel. Preserve the JSON as a single environment-variable value, including the escaped newlines in `private_key`.
 3. Set `FIREBASE_DATABASE_URL` to the exact Realtime Database URL for that project.
-4. Set a strong random `API_KEY_ADMIN_SECRET`.
+4. Set a strong random `(removed; use Firebase Authentication)`.
 5. Apply these values to **Production**, **Preview**, and/or **Development** as needed, then redeploy those environments.
 6. Test key creation, list, authenticated chat, and revocation. Do not share secrets in chat or commit them to Git.
 
@@ -47,7 +47,7 @@ Optional limit overrides: `CHAT_RATE_LIMIT_PER_MINUTE` (20), `API_KEY_DAILY_CHAT
 
 | Method | Route | Authentication |
 | --- | --- | --- |
-| POST | `/api/keys` | `API_KEY_ADMIN_SECRET` in JSON body; rate-limited |
+| POST | `/api/keys` | `(removed; use Firebase Authentication)` in JSON body; rate-limited |
 | POST | `/api/chat` | Required Shakil Bearer key |
 | POST | `/api/generate-image` | Required Shakil Bearer key |
 | GET | `/api/models` | Public; requires server-side OpenRouter configuration |
@@ -58,8 +58,13 @@ See [API.md](./API.md) for request formats, example server code, success/error r
 
 ## Important security notes
 
-- Never put `SHAKIL_API_KEY`, `API_KEY_ADMIN_SECRET`, Firebase service-account JSON, OpenRouter keys, or Cloudflare tokens in frontend JavaScript, local storage, or a public repository.
+- Never put `SHAKIL_API_KEY`, `(removed; use Firebase Authentication)`, Firebase service-account JSON, OpenRouter keys, or Cloudflare tokens in frontend JavaScript, local storage, or a public repository.
 - External integrations must call the authenticated routes, not the `/api/public/*` routes.
 - API key hashes are used as Firebase record IDs; raw issued keys are not saved.
 - A successful Vercel deployment does not prove provider credentials or Firebase connectivity work. Test the actual routes after deployment.
 - Rate limiting without Upstash is per serverless instance and is not a deployment-wide guarantee.
+
+
+## Version 3.0.0 — Firebase Authentication
+
+The website includes Firebase Authentication account creation and sign-in (Email/Password, Google, and GitHub UI). The API key endpoint verifies Firebase ID tokens server-side; users can manage only their own keys, while the verified admin email `shakil.dev.pro@gmail.com` can view all keys. Configure the desired sign-in providers in Firebase Console and set `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIREBASE_DATABASE_URL`, and optionally `FIREBASE_PROJECT_ID=shakil-dev-pro` in Vercel. The former admin-secret dependency has been removed from the key manager.
