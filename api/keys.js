@@ -13,6 +13,25 @@ module.exports=async function handler(req,res){
  const parsed=parseBody(req);if(parsed.error)return json(res,parsed.status,{error:parsed.error});
  const body=parsed.body, action=String(body.action||"");
  try{
+  if(action==="registerProfile"){
+   const photoURL=String(body.photoURL||"").trim().slice(0,2048);
+   const name=String(body.name||user.name||"").trim().slice(0,120);
+   const email=String(user.email||"").toLowerCase().slice(0,254);
+   const path="shakilUsers/"+user.uid;
+   const old=await db(path,"GET")||{};
+   await db(path,"PUT",{uid:user.uid,email,name,photoURL,createdAt:old.createdAt||new Date().toISOString(),lastSeenAt:new Date().toISOString()});
+   return json(res,200,{ok:true});
+  }
+  if(action==="adminOverview"){
+   if(!isAdmin)return json(res,403,{error:"Admin access required."});
+   const [usersRaw,keysRaw]=await Promise.all([db("shakilUsers","GET"),db("shakilApiKeys","GET")]);
+   const users=Object.values(usersRaw||{}).filter(u=>u&&u.uid).map(u=>({
+    uid:String(u.uid),email:String(u.email||""),name:String(u.name||""),photoURL:String(u.photoURL||""),createdAt:String(u.createdAt||""),lastSeenAt:String(u.lastSeenAt||""),
+    apiKeyCount:Object.values(keysRaw||{}).filter(k=>k&&k.ownerUid===u.uid&&k.revoked!==true).length
+   })).sort((a,b)=>b.apiKeyCount-a.apiKeyCount||a.email.localeCompare(b.email));
+   const totalApiKeys=Object.values(keysRaw||{}).filter(k=>k&&k.revoked!==true).length;
+   return json(res,200,{isAdmin:true,totalAccounts:users.length,totalApiKeys,users});
+  }
   if(action==="create"){
    const label=String(body.label||"My project").trim().slice(0,64)||"My project";
    let key="",hash="";
