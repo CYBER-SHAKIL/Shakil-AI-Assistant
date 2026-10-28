@@ -24,14 +24,14 @@ module.exports=async function handler(req,res){
   }
   if(action==="list"){
    const all=await db("shakilApiKeys","GET");
-   const keys=Object.entries(all||{}).filter(([id,r])=>isAdmin||r?.ownerUid===user.uid).map(([id,r])=>({id,label:r.label||"My project",prefix:r.prefix||"",createdAt:r.createdAt||"",revoked:r.revoked===true,ownerEmail:isAdmin?(r.ownerEmail||"") : undefined})).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+   const keys=Object.entries(all||{}).filter(([id,r])=>r?.revoked!==true&&(isAdmin||r?.ownerUid===user.uid)).map(([id,r])=>({id,label:r.label||"My project",prefix:r.prefix||"",createdAt:r.createdAt||"",revoked:r.revoked===true,ownerEmail:isAdmin?(r.ownerEmail||"") : undefined})).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
    return json(res,200,{keys,isAdmin});
   }
   if(action==="revoke"){
    const id=String(body.id||"");if(!/^[a-f0-9]{64}$/.test(id))return json(res,400,{error:"Invalid key ID."});
    const current=await db("shakilApiKeys/"+id,"GET");if(!current)return json(res,404,{error:"API key not found."});
    if(current.ownerUid!==user.uid&&!isAdmin)return json(res,403,{error:"You can only revoke your own API keys."});
-   await db("shakilApiKeys/"+id,"PATCH",{revoked:true,revokedAt:new Date().toISOString()});return json(res,200,{ok:true});
+   await db("shakilApiKeys/"+id,"DELETE");return json(res,200,{ok:true,deleted:true});
   }
   return json(res,400,{error:"Unknown action."});
  }catch(e){console.error("Shakil API key manager:",e?.message||e);return json(res,503,{error:"API key manager unavailable. Check Firebase server configuration."});}
