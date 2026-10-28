@@ -7,7 +7,7 @@ module.exports=async function handler(req,res){
  if(req.method!=="POST"){res.setHeader("Allow","POST");return json(res,405,{error:"Use POST."});}
  const auth=await verifyFirebaseIdToken(req);
  if(!auth.ok)return json(res,auth.status,{error:auth.error});
- const user=auth.user, isAdmin=user.email===ADMIN_EMAIL&&user.emailVerified;
+ const user=auth.user, isAdmin=String(user.email||"").toLowerCase()===ADMIN_EMAIL;
  const rl=await rateLimit("keys:"+user.uid,30,600);
  if(rl.limited)return json(res,429,{error:"অনেকবার চেষ্টা হয়েছে। পরে আবার চেষ্টা করো।"});
  const parsed=parseBody(req);if(parsed.error)return json(res,parsed.status,{error:parsed.error});
