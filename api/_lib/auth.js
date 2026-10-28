@@ -88,8 +88,22 @@ async function verifyTurnstile(req) {
   } catch { return {ok:false,configured:true}; }
 }
 async function requireValidKey(req) {
-  const key = String(req.headers["x-shakil-api-key"] || (String(req.headers.authorization || "").startsWith("Bearer sk-shakil-") ? String(req.headers.authorization).slice(7) : "")).trim();
-  if (!key) return {ok:false,required:false};
-  return {ok:await verifyShakilApiKey(key),required:true};
+  const customHeader = req.headers["x-shakil-api-key"];
+  const authorization = req.headers.authorization;
+  const supplied = customHeader !== undefined || authorization !== undefined;
+  if (!supplied) return {ok:false,required:false};
+  let key = "";
+  if (customHeader !== undefined) {
+    key = typeof customHeader === "string" ? customHeader.trim() : "";
+  } else {
+    const match = typeof authorization === "string" ? /^Bearer ([^\s]+)$/i.exec(authorization.trim()) : null;
+    key = match ? match[1] : "";
+  }
+  if (!key) return {ok:false,required:true};
+  try {
+    return {ok:await verifyShakilApiKey(key),required:true};
+  } catch (error) {
+    return {ok:false,required:true,unavailable:true};
+  }
 }
 module.exports = { BODY_LIMIT, getClientIp, json, parseBody, rateLimit, verifyTurnstile, requireValidKey, verifyShakilApiKey };
