@@ -10,21 +10,21 @@ Configure these in Vercel → Project → **Settings → Environment Variables**
 
 - `FIREBASE_SERVICE_ACCOUNT_JSON`: service-account JSON containing `client_email` and `private_key`.
 - `FIREBASE_DATABASE_URL`: Firebase Realtime Database URL (a `.firebasedatabase.app` or `.firebaseio.com` URL).
-- `API_KEY_ADMIN_SECRET`: a strong secret used only by the key-management endpoint.
+- `(removed; use Firebase Authentication)`: a strong secret used only by the key-management endpoint.
 
 Select each environment where you need this functionality (Production, Preview, Development). After changing variables, redeploy that environment. Do not paste secrets into chat, commit them, or place them in browser code.
 
 ### Create a key
 
-Send this request from a trusted terminal or server-side admin tool. The admin secret is shown as an environment variable, not hard-coded into source:
+Send this request from a trusted terminal or server-side admin tool. The Firebase Authentication is shown as an environment variable, not hard-coded into source:
 
 ```bash
 export API_BASE_URL="https://YOUR-PROJECT.vercel.app"
-read -s API_KEY_ADMIN_SECRET
-export API_KEY_ADMIN_SECRET
+read -s (removed; use Firebase Authentication)
+export (removed; use Firebase Authentication)
 curl -sS "$API_BASE_URL/api/keys" \
   -H "Content-Type: application/json" \
-  -d "{\"adminSecret\":\"$API_KEY_ADMIN_SECRET\",\"action\":\"create\",\"label\":\"My project\"}"
+  -d "{\"adminSecret\":\"$(removed; use Firebase Authentication)\",\"action\":\"create\",\"label\":\"My project\"}"
 ```
 
 A successful response is similar to:
@@ -42,14 +42,14 @@ A successful response is similar to:
 }
 ```
 
-The key value above is illustrative, not a working credential. Copy the actual `key` field into the secret manager for the project that will use it. The raw key is returned only once; it cannot be retrieved through list. This repository intentionally does not provide a browser admin form, because the admin secret must not be exposed to browser JavaScript. A copy button is not provided by the JSON API; use your trusted API client's copy feature or your terminal/secret manager.
+The key value above is illustrative, not a working credential. Copy the actual `key` field into the secret manager for the project that will use it. The raw key is returned only once; it cannot be retrieved through list. This repository intentionally does not provide a browser admin form, because the Firebase Authentication must not be exposed to browser JavaScript. A copy button is not provided by the JSON API; use your trusted API client's copy feature or your terminal/secret manager.
 
 ### List key metadata
 
 ```bash
 curl -sS "$API_BASE_URL/api/keys" \
   -H "Content-Type: application/json" \
-  -d "{\"adminSecret\":\"$API_KEY_ADMIN_SECRET\",\"action\":\"list\"}"
+  -d "{\"adminSecret\":\"$(removed; use Firebase Authentication)\",\"action\":\"list\"}"
 ```
 
 The response includes a `keys` array with record IDs, labels, prefixes, timestamps, and revoked state. It never includes raw keys.
@@ -61,12 +61,12 @@ Use the record `id` returned by list:
 ```bash
 curl -sS "$API_BASE_URL/api/keys" \
   -H "Content-Type: application/json" \
-  -d "{\"adminSecret\":\"$API_KEY_ADMIN_SECRET\",\"action\":\"revoke\",\"id\":\"64_CHARACTER_HEX_RECORD_ID\"}"
+  -d "{\"adminSecret\":\"$(removed; use Firebase Authentication)\",\"action\":\"revoke\",\"id\":\"64_CHARACTER_HEX_RECORD_ID\"}"
 ```
 
 Success: `{"ok":true}`. Revoke a compromised key immediately, remove it from the dependent project's secret store, and issue a new key if needed. Revoked keys must not authenticate.
 
-Key manager errors include `400` for invalid action/ID, `401` for incorrect admin secret, `404` for unknown key ID, `405` for a non-POST method, `429` for too many attempts, and `503` for missing/broken Firebase or admin configuration.
+Key manager errors include `400` for invalid action/ID, `401` for incorrect Firebase Authentication, `404` for unknown key ID, `405` for a non-POST method, `429` for too many attempts, and `503` for missing/broken Firebase or admin configuration.
 
 ## 2. Calling the external chat API
 
@@ -175,7 +175,7 @@ External projects must use `/api/chat` and `/api/generate-image`. Those routes r
 | --- | --- |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | Firebase service account for key storage/verification |
 | `FIREBASE_DATABASE_URL` | Firebase Realtime Database URL |
-| `API_KEY_ADMIN_SECRET` | Key-management admin secret |
+| `(removed; use Firebase Authentication)` | Key-management Firebase Authentication |
 | `OPENROUTER_API_KEY` | Chat and model discovery provider credential |
 | `CLOUDFLARE_ACCOUNT_ID` | Image-generation account |
 | `CLOUDFLARE_API_TOKEN` | Workers AI token |
@@ -189,7 +189,7 @@ Optional limits: `CHAT_RATE_LIMIT_PER_MINUTE` (20), `API_KEY_DAILY_CHAT_LIMIT` (
 ## 7. HTTP errors and troubleshooting
 
 - `400`: malformed JSON, invalid action, invalid key ID, or invalid request fields.
-- `401`: missing/invalid/revoked Shakil key on external chat/image endpoints, or wrong admin secret.
+- `401`: missing/invalid/revoked Shakil key on external chat/image endpoints, or wrong Firebase Authentication.
 - `403`: configured Turnstile verification failed on public website routes.
 - `404`: API key record not found during revoke.
 - `405`: unsupported HTTP method.
@@ -201,3 +201,8 @@ Optional limits: `CHAT_RATE_LIMIT_PER_MINUTE` (20), `API_KEY_DAILY_CHAT_LIMIT` (
 Firebase setup failures: confirm the service-account JSON is valid and includes `client_email` and `private_key`, check the exact `FIREBASE_DATABASE_URL`, verify service-account access to the database, and redeploy after variable changes. Never share the values themselves.
 
 Provider secrets are separate from issued Shakil keys. A valid Shakil key does not replace `OPENROUTER_API_KEY` or `CLOUDFLARE_API_TOKEN`; those remain server-side configuration. A successful deploy does not prove the provider or Firebase is reachable, so test the actual endpoints after deployment.
+
+
+## Version 3.0.0 — Firebase Authentication
+
+The website includes Firebase Authentication account creation and sign-in (Email/Password, Google, and GitHub UI). The API key endpoint verifies Firebase ID tokens server-side; users can manage only their own keys, while the verified admin email `shakil.dev.pro@gmail.com` can view all keys. Configure the desired sign-in providers in Firebase Console and set `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIREBASE_DATABASE_URL`, and optionally `FIREBASE_PROJECT_ID=shakil-dev-pro` in Vercel. The former admin-secret dependency has been removed from the key manager.
