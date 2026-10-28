@@ -78,6 +78,24 @@ function greetingFallback(text) {
   ];
   return first + "\n" + rest[Math.floor(Math.random() * rest.length)];
 }
+function ensureGreetingFirstLine(text, greetingText) {
+  const value = String(text || "");
+  if (!value.trim()) return value;
+  const lines = value.split(/\r?\n/);
+  const firstLine = (lines[0] || "").trim();
+  const greetingPrefix = /আসসালামু|assalamu/i.test(greetingText) ? "ওয়ালাইকুম আসসালাম! আমি Shakil AI Assistant 😊" :
+    /হ্যালো|হেলো|hello/i.test(greetingText) ? "হ্যালো! আমি Shakil AI Assistant 😊" :
+    "হাই! আমি Shakil AI Assistant 😊";
+  if (/Shakil AI Assistant/i.test(firstLine) && /^(হাই|হ্যালো|হেলো|ওয়ালাইকুম)/i.test(firstLine)) return value;
+  if (/Shakil AI Assistant/i.test(firstLine)) {
+    return greetingPrefix + (lines.length > 1 ? "\n" + lines.slice(1).join("\n") : "");
+  }
+  if (/^(হাই|হ্যালো|হেলো|ওয়ালাইকুম|আসসালামু)/i.test(firstLine)) {
+    lines[0] = firstLine.replace(/[.!?।\s]+$/, "") + " — আমি Shakil AI Assistant 😊";
+    return lines.join("\n");
+  }
+  return greetingPrefix + "\n" + value.trim();
+}
 function respondText(req, res, text) {
   if (req.body?.stream !== true) return json(res, 200, { reply: text, model: "greeting" });
   res.statusCode = 200;
@@ -461,7 +479,7 @@ module.exports = async function handler(req, res) {
             throw drift;
           }
           earlyChecked = true;
-          const clean = sanitizeDelta(earlyBuffer, filterState);
+          const clean = sanitizeDelta(req._shakilGreeting ? ensureGreetingFirstLine(earlyBuffer, greeting) : earlyBuffer, filterState);
           earlyBuffer = "";
           if (clean) sendText(clean);
           return;
@@ -488,7 +506,7 @@ module.exports = async function handler(req, res) {
             throw drift;
           }
           earlyChecked = true;
-          const clean = sanitizeDelta(earlyBuffer, filterState);
+          const clean = sanitizeDelta(req._shakilGreeting ? ensureGreetingFirstLine(earlyBuffer, greeting) : earlyBuffer, filterState);
           earlyBuffer = "";
           if (clean) sendText(clean);
         }
