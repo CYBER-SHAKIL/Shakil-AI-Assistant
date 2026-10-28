@@ -1,4 +1,4 @@
-const DEFAULT_MODEL = process.env.OPENROUTER_DEFAULT_MODEL || "google/gemma-4-31b-it:free";
+const DEFAULT_MODEL = "openrouter/free";
 const FALLBACK_MODEL = "openrouter/free";
 const BASE_PROMPT = `LANGUAGE RULE: Reply ONLY in Bengali (Bangla script) with English technical terms where needed. NEVER output Chinese, Japanese, Korean, Thai, Hindi/Devanagari, Arabic, Cyrillic or any other script. Never mix random foreign words into Bengali sentences. Use correct Bangla spelling. If unsure of a word, use a simple Bangla or English word. Exception: only when the user explicitly asks to translate into another language.
 
@@ -27,10 +27,12 @@ const { getClientIp, json, parseBody, rateLimit, verifyTurnstile, requireValidKe
 
 const FORBIDDEN_SCRIPT = /[\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u30FF\uAC00-\uD7AF\u0E00-\u0E7F\u0900-\u097F\u0600-\u06FF\u0400-\u04FF\u0590-\u05FF]/u;
 function containsForbiddenScript(value) { return FORBIDDEN_SCRIPT.test(String(value || "")); }
+function hasTranslationException(latestText) {
+  return /(?:translate|translation|অনুবাদ)/i.test(String(latestText || "")) &&
+    /(?:Chinese|Japanese|Korean|Thai|Hindi|Arabic|Russian|Hebrew|中文|日本語|한국어|ไทย|हिन्दी|العربية|русский|עברית|চীনা|জাপানি|কোরিয়ান|আরবি)/i.test(String(latestText || ""));
+}
 function createFilterState(latestText) {
-  const translationRequest = /(?:translate|translation|অনুবাদ)/i.test(latestText) &&
-    /(?:Chinese|Japanese|Korean|Thai|Hindi|Arabic|Russian|Hebrew|中文|日本語|한국어|ไทย|हिन्दी|العربية|русский|עברית|চীনা|জাপানি|কোরিয়ান|আরবি)/i.test(latestText);
-  return { disabled: containsForbiddenScript(latestText) || translationRequest, inFence: false, pendingTicks: 0 };
+  return { disabled: containsForbiddenScript(latestText) || hasTranslationException(latestText), inFence: false, pendingTicks: 0 };
 }
 function sanitizeDelta(text, state) {
   const input = String(text || "");
@@ -277,7 +279,8 @@ module.exports = async function handler(req, res) {
   if (!apiKey) return json(res, 503, { error: "Vercel-এ OPENROUTER_API_KEY Environment Variable যোগ করতে হবে।" });
   const requested = typeof body.model === "string" ? body.model : DEFAULT_MODEL;
   const model = requested === FALLBACK_MODEL ? await chooseAutoModel(messages) : (requested.endsWith(":free") ? requested : DEFAULT_MODEL);
-  const upstreamMessages = [{ role: "system", content: BASE_PROMPT }, ...messages.filter(m => m.role !== "system")];
+  const greetingInstruction = req._shakilGreeting ? "\n\nGREETING RULE: This is the first greeting in this conversation. The first line must naturally greet the user and identify yourself as “আমি Shakil AI Assistant 😊” (adapt the greeting words to the user). Then add exactly one short, friendly, varied Bengali sentence. Do not list capabilities." : "";
+  const upstreamMessages = [{ role: "system", content: BASE_PROMPT + greetingInstruction }, ...messages.filter(m => m.role !== "system")];
   const tools = [
     { type: "function", function: { name: "calculator", description: "Calculate a basic arithmetic expression accurately.", parameters: { type: "object", properties: { expression: { type: "string", description: "Arithmetic expression using numbers, parentheses, +, -, *, /, %, and ^." } }, required: ["expression"], additionalProperties: false } } },
     { type: "function", function: { name: "web_search", description: "Search the live web for current, recent, changing, or hard-to-verify facts. Avoid timeless questions.", parameters: { type: "object", properties: { query: { type: "string", description: "Short search query, maximum 300 characters." } }, required: ["query"], additionalProperties: false } } }
@@ -391,7 +394,7 @@ module.exports = async function handler(req, res) {
   try {
     const candidates = [...new Set([
       model,
-      ...(requested === FALLBACK_MODEL ? [] : [FALLBACK_MODEL]),
+      ...(model === FALLBACK_MODEL ? [] : [FALLBACK_MODEL]),
       "google/gemma-4-26b-a4b-it:free",
       "google/gemma-4-31b-it:free",
       "openrouter/free"
@@ -521,12 +524,12 @@ module.exports = async function handler(req, res) {
             } else output = JSON.stringify({ error: "Tool not permitted" });
             toolMessages.push({ role: "tool", tool_call_id: call.id, content: output });
           }
-          try { toolResult = await streamModel(candidate, toolMessages, round < 1, sendText); }
+          try { toolResult = await streamModel(candidate, toolMessages, round < 1, deliverFiltered); }
           catch (error) { toolFailure = error.message || "Tool follow-up failed."; break; }
         }
         if (toolFailure) lastFailure = toolFailure;
-        else if (toolResult.text.trim()) {
-          if (body.stream !== true) return json(res, 200, { reply: toolResult.text, model: candidate });
+        else if (responseText.trim()) {
+          if (body.stream !== true) return json(res, 200, { reply: responseText || sanitizeDelta(toolResult.text, filterState), model: candidate });
           if (!res.writableEnded) { res.write("data: [DONE]\n\n"); return res.end(); }
           return;
         } else lastFailure = "Tool result-এর পরে মডেল কোনো উত্তর দেয়নি।";
@@ -540,8 +543,8 @@ module.exports = async function handler(req, res) {
         continue;
       }
 
-      if (firstResult.text.trim()) {
-        if (body.stream !== true) return json(res, 200, { reply: firstResult.text, model: candidate });
+      if (responseText.trim()) {
+        if (body.stream !== true) return json(res, 200, { reply: responseText, model: candidate });
         if (!res.writableEnded) {
           res.write("data: [DONE]\n\n");
           return res.end();
