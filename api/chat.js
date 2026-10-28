@@ -27,10 +27,12 @@ const { getClientIp, json, parseBody, rateLimit, verifyTurnstile, requireValidKe
 
 const FORBIDDEN_SCRIPT = /[\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u30FF\uAC00-\uD7AF\u0E00-\u0E7F\u0900-\u097F\u0600-\u06FF\u0400-\u04FF\u0590-\u05FF]/u;
 function containsForbiddenScript(value) { return FORBIDDEN_SCRIPT.test(String(value || "")); }
+function hasTranslationException(latestText) {
+  return /(?:translate|translation|অনুবাদ)/i.test(String(latestText || "")) &&
+    /(?:Chinese|Japanese|Korean|Thai|Hindi|Arabic|Russian|Hebrew|中文|日本語|한국어|ไทย|हिन्दी|العربية|русский|עברית|চীনা|জাপানি|কোরিয়ান|আরবি)/i.test(String(latestText || ""));
+}
 function createFilterState(latestText) {
-  const translationRequest = /(?:translate|translation|অনুবাদ)/i.test(latestText) &&
-    /(?:Chinese|Japanese|Korean|Thai|Hindi|Arabic|Russian|Hebrew|中文|日本語|한국어|ไทย|हिन्दी|العربية|русский|עברית|চীনা|জাপানি|কোরিয়ান|আরবি)/i.test(latestText);
-  return { disabled: containsForbiddenScript(latestText) || translationRequest, inFence: false, pendingTicks: 0 };
+  return { disabled: containsForbiddenScript(latestText) || hasTranslationException(latestText), inFence: false, pendingTicks: 0 };
 }
 function sanitizeDelta(text, state) {
   const input = String(text || "");
