@@ -1,113 +1,141 @@
-# Shakil AI Assistant — API নির্দেশিকা
+# Shakil AI Assistant — API Guide
 
-এই ডকুমেন্টে Vercel serverless API-এর route, request format, authentication, response ও troubleshooting দেওয়া হলো। Production base URL: `https://shakil-ai-assistant-pro.vercel.app`। নিজের বর্তমান Vercel production domain ভিন্ন হলে সেটি ব্যবহার করো।
+Base URL: use your current Vercel deployment URL, for example `https://YOUR-PROJECT.vercel.app`. Do not assume a sample hostname is your live production URL.
 
-## সাধারণ নিয়ম
+## 1. API key lifecycle
 
-- JSON request-এর জন্য `Content-Type: application/json` পাঠাও।
-- Provider secret (`OPENROUTER_API_KEY`, Cloudflare token, Tavily key, Firebase service-account JSON) browser থেকে পাঠানোর দরকার নেই এবং এগুলো কখনো public client-এ রেখো না।
-- Project API key থাকলে `x-shakil-api-key: sk-shakil-...` header অথবা `Authorization: Bearer sk-shakil-...` ব্যবহার করো।
-- Project API key না দিলে public chat/image endpoint-এর request Turnstile check-এর মধ্য দিয়ে যেতে পারে। `TURNSTILE_SECRET_KEY` সেট না থাকলে server verification সক্রিয় থাকে না।
-- JSON error response সাধারণত `{ "error": "..." }` ফরম্যাটে আসে।
-- Body ভুল JSON হলে `400`; body limit ছাড়ালে `413`; rate limit ছাড়ালে `429` হতে পারে।
+### Required server environment
 
-## 1. `POST /api/chat`
+Configure these in Vercel → Project → **Settings → Environment Variables**:
 
-Text chat, code help, streamed output, সীমিত arithmetic calculator এবং `TAVILY_API_KEY` থাকলে web search।
+- `FIREBASE_SERVICE_ACCOUNT_JSON`: service-account JSON containing `client_email` and `private_key`.
+- `FIREBASE_DATABASE_URL`: Firebase Realtime Database URL (a `.firebasedatabase.app` or `.firebaseio.com` URL).
+- `API_KEY_ADMIN_SECRET`: a strong secret used only by the key-management endpoint.
 
-### Request body
+Select each environment where you need this functionality (Production, Preview, Development). After changing variables, redeploy that environment. Do not paste secrets into chat, commit them, or place them in browser code.
+
+### Create a key
+
+Send this request from a trusted terminal or server-side admin tool. The admin secret is shown as an environment variable, not hard-coded into source:
+
+```bash
+export API_BASE_URL="https://YOUR-PROJECT.vercel.app"
+read -s API_KEY_ADMIN_SECRET
+export API_KEY_ADMIN_SECRET
+curl -sS "$API_BASE_URL/api/keys" \
+  -H "Content-Type: application/json" \
+  -d "{\"adminSecret\":\"$API_KEY_ADMIN_SECRET\",\"action\":\"create\",\"label\":\"My project\"}"
+```
+
+A successful response is similar to:
 
 ```json
 {
-  "model": "openrouter/free",
-  "stream": false,
-  "messages": [
-    { "role": "user", "content": "বাংলায় একটি HTML উদাহরণ দাও" }
-  ]
+  "key": "sk-shakil-ONE_TIME_VALUE",
+  "record": {
+    "label": "My project",
+    "prefix": "sk-shakil-...",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "revoked": false
+  },
+  "warning": "Copy this key now. It will not be shown again."
 }
 ```
 
-- `model`: `openrouter/free` অথবা `:free` দিয়ে শেষ হওয়া free model ID। বাদ দিলে Auto route ব্যবহার হয়।
-- `stream`: `false` বা বাদ দিলে JSON response; `true` দিলে Server-Sent Events (SSE)।
-- `messages`: non-empty array; শুধু `user` ও `assistant` role অনুমোদিত। `system` role পাঠানো যাবে না।
-- সর্বশেষ 30টি message process করা হয়। একটি text message সর্বোচ্চ 12,000 অক্ষর।
-- Image input-এর জন্য `content` একটি text/image part array হতে পারে; image URL অবশ্যই base64 `data:image/png`, `jpeg`, `webp` বা `gif` URL হতে হবে। সব image মিলে সর্বোচ্চ 2.5 MB। নির্বাচিত model-কে image input সমর্থন করতে হবে।
+The key value above is illustrative, not a working credential. Copy the actual `key` field into the secret manager for the project that will use it. The raw key is returned only once; it cannot be retrieved through list. This repository intentionally does not provide a browser admin form, because the admin secret must not be exposed to browser JavaScript. A copy button is not provided by the JSON API; use your trusted API client's copy feature or your terminal/secret manager.
 
-### JSON response (stream=false)
+### List key metadata
+
+```bash
+curl -sS "$API_BASE_URL/api/keys" \
+  -H "Content-Type: application/json" \
+  -d "{\"adminSecret\":\"$API_KEY_ADMIN_SECRET\",\"action\":\"list\"}"
+```
+
+The response includes a `keys` array with record IDs, labels, prefixes, timestamps, and revoked state. It never includes raw keys.
+
+### Revoke a key
+
+Use the record `id` returned by list:
+
+```bash
+curl -sS "$API_BASE_URL/api/keys" \
+  -H "Content-Type: application/json" \
+  -d "{\"adminSecret\":\"$API_KEY_ADMIN_SECRET\",\"action\":\"revoke\",\"id\":\"64_CHARACTER_HEX_RECORD_ID\"}"
+```
+
+Success: `{"ok":true}`. Revoke a compromised key immediately, remove it from the dependent project's secret store, and issue a new key if needed. Revoked keys must not authenticate.
+
+Key manager errors include `400` for invalid action/ID, `401` for incorrect admin secret, `404` for unknown key ID, `405` for a non-POST method, `429` for too many attempts, and `503` for missing/broken Firebase or admin configuration.
+
+## 2. Calling the external chat API
+
+Store the issued key in the other project's server environment as `SHAKIL_API_KEY`. Do not place it in frontend JavaScript, browser storage, public repositories, or client-side requests.
+
+Example Node.js server code:
+
+```js
+const response = await fetch(`${process.env.SHAKIL_API_BASE_URL}/api/chat`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${process.env.SHAKIL_API_KEY}`
+  },
+  body: JSON.stringify({
+    model: "openrouter/free",
+    stream: false,
+    messages: [{ role: "user", content: "বাংলায় একটি HTML উদাহরণ দাও" }]
+  })
+});
+
+const data = await response.json();
+if (!response.ok) {
+  throw new Error(`Shakil API error ${response.status}: ${data.error || "Request failed"}`);
+}
+console.log(data.reply);
+```
+
+Set `SHAKIL_API_BASE_URL` to your deployed Shakil API base URL and `SHAKIL_API_KEY` to the issued key in your hosting provider's server-side environment settings. The code above runs on a server, not in a browser.
+
+Request body:
+
+- `model`: `openrouter/free` or an available free model ID ending in `:free`; defaults to Auto if omitted.
+- `stream`: `false`/omitted returns JSON; `true` returns Server-Sent Events (SSE).
+- `messages`: a non-empty array of `user` and `assistant` messages. Do not send a `system` role.
+- Up to 30 recent messages are processed. Each text message is limited to 12,000 characters.
+- Image analysis may be requested using supported base64 `data:image/...` parts in message content; the selected model must support image input.
+
+Success (`stream: false`):
 
 ```json
-{
-  "reply": "এখানে AI-এর উত্তর",
-  "model": "ব্যবহৃত model ID"
+{ "reply": "এখানে AI-এর উত্তর", "model": "openrouter/free" }
+```
+
+With `stream: true`, the content type is `text/event-stream`; parse the SSE chunks and stop at `data: [DONE]`.
+
+## 3. Calling the external image-generation API
+
+```js
+const response = await fetch(`${process.env.SHAKIL_API_BASE_URL}/api/generate-image`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${process.env.SHAKIL_API_KEY}`
+  },
+  body: JSON.stringify({
+    prompt: "A peaceful river in Bangladesh at sunset, cinematic lighting"
+  })
+});
+const data = await response.json();
+if (!response.ok) {
+  throw new Error(`Shakil image API error ${response.status}: ${data.error || "Request failed"}`);
 }
+// data.imageBase64 contains the generated image.
 ```
 
-সাধারণ greeting-এর জন্য backend `model: "greeting"`-সহ JSON দিতে পারে।
+Request format: `{"prompt":"..."}`; prompt is required and limited to 1,000 characters. Reference-image image-to-image generation is not supported currently.
 
-### Streaming response (stream=true)
-
-Response content type `text/event-stream`। প্রতিটি event-এর data-তে OpenAI-style chunk থাকে, যেমন:
-
-```text
-data: {"choices":[{"delta":{"content":"হ্যালো"}}]}
-
-data: [DONE]
-```
-
-Client-কে SSE event পড়তে হবে এবং `data: [DONE]` এলে stream শেষ করতে হবে। Stream শুরু হওয়ার পর upstream error হলে HTTP status ইতিমধ্যে 200 হয়ে থাকতে পারে; তাই client-কে stream-এর error event/শেষ হওয়া যাচাই করতে হবে।
-
-### Rate limit ও error
-
-- Default: প্রতি IP-তে 20 request/minute (`CHAT_RATE_LIMIT_PER_MINUTE`)।
-- Project API key ব্যবহার করলে default 500 chat request/day (`API_KEY_DAILY_CHAT_LIMIT`)।
-- Invalid/revoked key: `401`।
-- Turnstile configured থাকলে verification failure: `403`।
-- Rate limit: `429`।
-- OpenRouter key অনুপস্থিত: `503`।
-- Model/provider failure: upstream failure অনুযায়ী error হতে পারে; fallback model চেষ্টা করা হয়।
-
-## 2. `GET /api/models`
-
-OpenRouter থেকে পাওয়া free chat model তালিকা এবং vision capability দেয়। এই route-এর জন্য server-side `OPENROUTER_API_KEY` প্রয়োজন।
-
-Example:
-
-```json
-{
-  "models": [
-    {
-      "id": "openrouter/free",
-      "name": "OpenRouter Free Router",
-      "vision": true,
-      "contextLength": null
-    }
-  ]
-}
-```
-
-প্রতিটি model object-এ `id`, `name`, `vision`, `contextLength` থাকতে পারে। প্রকৃত তালিকা OpenRouter-এর availability অনুসারে পরিবর্তিত হয়; উপরের object কেবল format-এর উদাহরণ। Cache header প্রায় 5 মিনিটের জন্য response cache করতে পারে।
-
-- `405`: GET ছাড়া অন্য method।
-- `503`: `OPENROUTER_API_KEY` configure করা নেই।
-- `502`: upstream model list পাওয়া যায়নি।
-
-## 3. `POST /api/generate-image`
-
-Cloudflare Workers AI model `@cf/black-forest-labs/flux-1-schnell` দিয়ে text-to-image generation।
-
-### Request
-
-```json
-{
-  "prompt": "A peaceful river in Bangladesh at sunset, cinematic lighting"
-}
-```
-
-- `prompt` আবশ্যক; সর্বোচ্চ 1,000 অক্ষর।
-- `referenceImages` দিয়ে image-to-image generation এখনো সমর্থিত নয়; পাঠালে `400` আসবে।
-- প্রয়োজনীয় server variables: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`। `OPENROUTER_API_KEY` থাকলে non-ASCII prompt-এর enhancement চেষ্টা করা হয়; enhancement ব্যর্থ হলে মূল prompt ব্যবহার হয়।
-
-### সফল response
+Success response:
 
 ```json
 {
@@ -117,119 +145,59 @@ Cloudflare Workers AI model `@cf/black-forest-labs/flux-1-schnell` দিয়ে 
 }
 ```
 
-Client-কে `imageBase64` ও `mimeType` দিয়ে image দেখাতে হবে।
+Image generation requires the server-side `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` variables. OpenRouter may be used to improve some non-ASCII prompts, but it is not the image provider.
 
-### Limit
+## 4. Model discovery
 
-- প্রতি IP-তে default 5 image/day: `IMAGE_DAILY_LIMIT_PER_IP`
-- প্রতি project API key-তে default 20 image/day: `IMAGE_DAILY_LIMIT_PER_KEY`
-- সব request মিলিয়ে default 100 image/day: `IMAGE_GLOBAL_DAILY_LIMIT`
+`GET /api/models` is public because the website's model selector uses it. It returns the current free-model list from OpenRouter and does not return provider secrets.
 
-Configuration অনুপস্থিত হলে `503`; provider response failure বা connection failure হলে সাধারণত `502`; limit ছাড়ালে `429`।
-
-## 4. `POST /api/keys`
-
-Firebase Realtime Database-এ project API key তৈরি, তালিকা দেখা এবং revoke করা। এই route ব্যবহার করতে `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIREBASE_DATABASE_URL` এবং `API_KEY_ADMIN_SECRET` configure করতে হবে।
-
-**Request-এ `adminSecret` পাঠানো হয়। এটি private admin secret—কখনো frontend source, public repository বা public chat-এ রেখো না।**
-
-### Create
+Example:
 
 ```json
 {
-  "adminSecret": "YOUR_PRIVATE_ADMIN_SECRET",
-  "action": "create",
-  "label": "My project"
+  "models": [
+    { "id": "openrouter/free", "name": "OpenRouter Free Router", "vision": true, "contextLength": null }
+  ]
 }
 ```
 
-সফল response-এ `key`, `record`, `warning` থাকে। Raw key একবারই দেখানো হয়; সঙ্গে সঙ্গে নিরাপদ জায়গায় কপি করো। Database-এ raw key নয়, SHA-256 hash ও metadata রাখা হয়।
+The model list changes with provider availability; this is only an example. `OPENROUTER_API_KEY` must be configured on the server.
 
-### List
+## 5. Public website routes versus authenticated API routes
 
-```json
-{
-  "adminSecret": "YOUR_PRIVATE_ADMIN_SECRET",
-  "action": "list"
-}
-```
+The website uses `POST /api/public/chat` and `POST /api/public/generate-image` to preserve its public user experience. These routes do not require a Shakil API key; they use the public flow and rate limits, and enforce Turnstile if `TURNSTILE_SECRET_KEY` is configured.
 
-Response-এ `keys` array থাকে। তালিকায় key metadata ও record ID থাকে, raw key নয়।
+External projects must use `/api/chat` and `/api/generate-image`. Those routes reject missing, malformed, invalid, and revoked Shakil keys with `401`. If Firebase cannot be reached or is misconfigured, key verification fails closed with `503` rather than accepting the key.
 
-### Revoke
+## 6. Environment variables
 
-```json
-{
-  "adminSecret": "YOUR_PRIVATE_ADMIN_SECRET",
-  "action": "revoke",
-  "id": "64-character-lowercase-hex-record-id"
-}
-```
-
-সফল হলে `{ "ok": true }` ফেরত আসে। Revoke করার পর key আর valid হওয়া উচিত নয়।
-
-- শুধু POST অনুমোদিত; অন্য method-এ `405`।
-- ভুল admin secret: `401`।
-- 10 মিনিটে IP-প্রতি 10 ভুল/অতিরিক্ত attempt-এর পরে `429`।
-- Firebase/env সমস্যা হলে `503`।
-
-## 5. Environment variables
-
-Vercel → Project → Settings → Environment Variables-এ server-side values যোগ করে redeploy করো।
-
-| Variable | কোন কাজে লাগে |
+| Variable | Purpose |
 | --- | --- |
-| `OPENROUTER_API_KEY` | Chat ও model discovery; optional prompt enhancement |
-| `APP_URL` | Canonical app origin ও CORS |
-| `CLOUDFLARE_ACCOUNT_ID` | Image generation |
-| `CLOUDFLARE_API_TOKEN` | Workers AI access |
-| `TAVILY_API_KEY` | Optional live web search |
-| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Persistent rate limiting |
-| `TURNSTILE_SECRET_KEY` | Optional server-side Turnstile verification |
-| `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIREBASE_DATABASE_URL` | Firebase-backed project key manager |
-| `API_KEY_ADMIN_SECRET` | Project key manager admin authorization |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | Firebase service account for key storage/verification |
+| `FIREBASE_DATABASE_URL` | Firebase Realtime Database URL |
+| `API_KEY_ADMIN_SECRET` | Key-management admin secret |
+| `OPENROUTER_API_KEY` | Chat and model discovery provider credential |
+| `CLOUDFLARE_ACCOUNT_ID` | Image-generation account |
+| `CLOUDFLARE_API_TOKEN` | Workers AI token |
+| `APP_URL` | Website origin/CORS |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Recommended persistent rate limiting |
+| `TURNSTILE_SECRET_KEY` | Optional Turnstile verification for public website routes |
+| `TAVILY_API_KEY` | Optional web search |
 
-Optional limits: `CHAT_RATE_LIMIT_PER_MINUTE` (20), `API_KEY_DAILY_CHAT_LIMIT` (500), `IMAGE_DAILY_LIMIT_PER_IP` (5), `IMAGE_DAILY_LIMIT_PER_KEY` (20), `IMAGE_GLOBAL_DAILY_LIMIT` (100), `WEB_SEARCH_DAILY_GLOBAL_LIMIT` (1000), `WEB_SEARCH_DAILY_IP_LIMIT` (20), `WEB_SEARCH_DAILY_KEY_LIMIT` (100)। প্রতিটি value code-এর default override করে।
+Optional limits: `CHAT_RATE_LIMIT_PER_MINUTE` (20), `API_KEY_DAILY_CHAT_LIMIT` (500), `IMAGE_DAILY_LIMIT_PER_IP` (5), `IMAGE_DAILY_LIMIT_PER_KEY` (20), `IMAGE_GLOBAL_DAILY_LIMIT` (100), `WEB_SEARCH_DAILY_GLOBAL_LIMIT` (1000), `WEB_SEARCH_DAILY_IP_LIMIT` (20), `WEB_SEARCH_DAILY_KEY_LIMIT` (100).
 
-## 6. cURL উদাহরণ
+## 7. HTTP errors and troubleshooting
 
-Non-stream chat:
+- `400`: malformed JSON, invalid action, invalid key ID, or invalid request fields.
+- `401`: missing/invalid/revoked Shakil key on external chat/image endpoints, or wrong admin secret.
+- `403`: configured Turnstile verification failed on public website routes.
+- `404`: API key record not found during revoke.
+- `405`: unsupported HTTP method.
+- `413`: request body too large.
+- `429`: rate/quota limit exceeded.
+- `502`: upstream provider or model-list failure.
+- `503`: missing provider credentials, missing Firebase/admin configuration, or Firebase verification temporarily unavailable.
 
-```bash
-curl https://shakil-ai-assistant-pro.vercel.app/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"model":"openrouter/free","stream":false,"messages":[{"role":"user","content":"হ্যালো"}]}'
-```
+Firebase setup failures: confirm the service-account JSON is valid and includes `client_email` and `private_key`, check the exact `FIREBASE_DATABASE_URL`, verify service-account access to the database, and redeploy after variable changes. Never share the values themselves.
 
-Project API key দিয়ে chat:
-
-```bash
-curl https://shakil-ai-assistant-pro.vercel.app/api/chat \
-  -H "Content-Type: application/json" \
-  -H "x-shakil-api-key: sk-shakil-YOUR_KEY" \
-  -d '{"model":"openrouter/free","stream":false,"messages":[{"role":"user","content":"বাংলায় উত্তর দাও"}]}'
-```
-
-Image generation:
-
-```bash
-curl https://shakil-ai-assistant-pro.vercel.app/api/generate-image \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"A simple landscape at sunset"}'
-```
-
-Public endpoints-এর request limit এবং provider-এর account limits প্রযোজ্য। নিজের project key তৈরি করে ব্যবহার করলে request-এ সেটি header হিসেবে পাঠাও।
-
-## 7. Troubleshooting
-
-- **Chat-এ 503:** Vercel-এ `OPENROUTER_API_KEY` আছে কি না এবং সঠিক environment (Production/Preview/Development) নির্বাচন করা হয়েছে কি না দেখো; তারপর redeploy করো।
-- **Model list empty/502:** OpenRouter key ও upstream service পরীক্ষা করো। Free model availability পরিবর্তিত হতে পারে।
-- **Image generation 503:** `CLOUDFLARE_ACCOUNT_ID` ও `CLOUDFLARE_API_TOKEN` আছে কি না দেখো।
-- **Image generation 502:** Cloudflare Workers AI permission, account usage/limits এবং token status পরীক্ষা করো।
-- **401 invalid project key:** key revoke হয়েছে কি না, header format ঠিক কি না এবং Firebase configuration সচল কি না দেখো।
-- **API key manager 503:** নতুন/valid `FIREBASE_SERVICE_ACCOUNT_JSON`, সঠিক `FIREBASE_DATABASE_URL`, এবং `API_KEY_ADMIN_SECRET` configure করে redeploy করো।
-- **429:** দৈনিক বা মিনিটভিত্তিক limit শেষ; সময়/limit reset না হওয়া পর্যন্ত অপেক্ষা করো।
-- **Rate limit persistent নয়:** `UPSTASH_REDIS_REST_URL` ও `UPSTASH_REDIS_REST_TOKEN` configure করো।
-- **CORS:** browser request-এর origin `APP_URL`-এর origin-এর সঙ্গে মিলতে হবে; `APP_URL` পরিবর্তন করলে redeploy করো।
-
-API syntax ও documentation উদাহরণ end-to-end provider connectivity নিশ্চিত করে না। Production endpoint নিজে পরীক্ষা করো এবং Vercel logs-এ error দেখো—secret value log বা share করবে না।
+Provider secrets are separate from issued Shakil keys. A valid Shakil key does not replace `OPENROUTER_API_KEY` or `CLOUDFLARE_API_TOKEN`; those remain server-side configuration. A successful deploy does not prove the provider or Firebase is reachable, so test the actual endpoints after deployment.
