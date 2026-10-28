@@ -25,13 +25,32 @@ ${process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN ? "- ছ
 // Mode selection is removed; infer the task from each user message.
 const { getClientIp, json, parseBody, rateLimit, verifyTurnstile, requireValidKey } = require("./_lib/auth");
 
+const FORBIDDEN_SCRIPT = /[\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u30FF\uAC00-\uD7AF\u0E00-\u0E7F\u0900-\u097F\u0600-\u06FF\u0400-\u04FF\u0590-\u05FF]/u;
+function containsForbiddenScript(value) { return FORBIDDEN_SCRIPT.test(String(value || "")); }
+function createFilterState(latestText) {
+  const translationRequest = /(?:translate|translation|অনুবাদ)/i.test(latestText) &&
+    /(?:Chinese|Japanese|Korean|Thai|Hindi|Arabic|Russian|Hebrew|中文|日本語|한국어|ไทย|हिन्दी|العربية|русский|עברית|চীনা|জাপানি|কোরিয়ান|আরবি)/i.test(latestText);
+  return { disabled: containsForbiddenScript(latestText) || translationRequest, inFence: false, pendingTicks: 0 };
+}
 function sanitizeDelta(text, state) {
-  if (!state || state.disabled) return String(text || "");
+  const input = String(text || "");
+  if (!state || state.disabled) return input;
   let out = "";
-  for (const ch of String(text || "")) {
+  for (const ch of input) {
+    if (ch === "`") {
+      state.pendingTicks = (state.pendingTicks || 0) + 1;
+      if (state.pendingTicks === 3) {
+        out += "```";
+        state.inFence = !state.inFence;
+        state.pendingTicks = 0;
+      }
+      continue;
+    }
+    if (state.pendingTicks) {
+      out += "`".repeat(state.pendingTicks);
+      state.pendingTicks = 0;
+    }
     const cp = ch.codePointAt(0);
-    if (ch === "`") state.ticks = (state.ticks || 0) + 1;
-    if (state.ticks >= 3) state.inFence = !state.inFence, state.ticks = 0;
     const forbidden = (cp >= 0x4e00 && cp <= 0x9fff) || (cp >= 0x3400 && cp <= 0x4dbf) ||
       (cp >= 0x3040 && cp <= 0x30ff) || (cp >= 0xac00 && cp <= 0xd7af) ||
       (cp >= 0x0e00 && cp <= 0x0e7f) || (cp >= 0x0900 && cp <= 0x097f) ||
@@ -40,6 +59,22 @@ function sanitizeDelta(text, state) {
     out += forbidden && !state.inFence ? "" : ch;
   }
   return out;
+}
+function greetingFallback(text) {
+  const first = /আসসালামু|assalamu/i.test(text) ? "ওয়ালাইকুম আসসালাম! আমি Shakil AI Assistant 😊" :
+    /হ্যালো|হেলো|hello/i.test(text) ? "হ্যালো! আমি Shakil AI Assistant 😊" :
+    "হাই! আমি Shakil AI Assistant 😊";
+  const rest = [
+    "তোমার দিনটা ভালো কাটুক! 🌼",
+    "আশা করি আজ সব ভালো চলছে। 😊",
+    "আজকের মুহূর্তটা সুন্দর হোক! ✨",
+    "শুভেচ্ছা রইল—ভালো থেকো। 💙",
+    "কথা শুরু হোক সুন্দরভাবে! 🌿",
+    "তোমার জন্য রইল একটুখানি শুভকামনা। 😊",
+    "আজকের দিনটা আনন্দে কাটুক! 🌟",
+    "অনেক শুভেচ্ছা রইল তোমার জন্য। 💫"
+  ];
+  return first + "\n" + rest[Math.floor(Math.random() * rest.length)];
 }
 function respondText(req, res, text) {
   if (req.body?.stream !== true) return json(res, 200, { reply: text, model: "greeting" });
@@ -155,7 +190,10 @@ async function searchWeb(args, ip, keyAuth, req) {
 }
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const allowedOrigin = (() => { try { return process.env.APP_URL ? new URL(process.env.APP_URL).origin : ""; } catch { return ""; } })();
+  const requestOrigin = req.headers.origin || "";
+  if (allowedOrigin && requestOrigin === allowedOrigin) res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+  res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Shakil-Api-Key, X-Turnstile-Token");
   if (req.method === "OPTIONS") { res.statusCode = 204; return res.end(); }
@@ -176,10 +214,12 @@ module.exports = async function handler(req, res) {
     const keyLimit = await rateLimit("chat:key:" + String(req.headers["x-shakil-api-key"] || req.headers.authorization || "").trim(), Number(process.env.API_KEY_DAILY_CHAT_LIMIT) || 500, 86400);
     if (keyLimit.limited) return json(res, 429, { error: "এই API key-এর দৈনিক chat limit শেষ হয়েছে।" });
   }
-  if (!Array.isArray(body.messages) || body.messages.length === 0 || body.messages.length > 500) return json(res, 400, { error: "messages must be a non-empty array with at most 500 items." });
+  if (!Array.isArray(body.messages) || body.messages.length === 0) return json(res, 400, { error: "messages must be a non-empty array." });
   const messages = [];
   let imageBytes = 0;
-  for (const item of body.messages.slice(-30)) {
+  const recentMessages = body.messages.slice(-30);
+  while (recentMessages.length && recentMessages[0]?.role !== "user") recentMessages.shift();
+  for (const item of recentMessages) {
     if (!item || !["user","assistant"].includes(item.role)) return json(res, 400, { error: "শুধু user ও assistant message গ্রহণ করা হয়; system role অনুমোদিত নয়।" });
     if (typeof item.content === "string") {
       if (item.content.length > 12000) return json(res, 413, { error: "একটি message অনেক বড়। 12,000 অক্ষরের মধ্যে রাখো।" });
@@ -256,12 +296,16 @@ module.exports = async function handler(req, res) {
     const controller = new AbortController();
     activeController = controller;
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 23000);
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 18000);
+    const latestPromptText = typeof latestUserMessage?.content === "string" ? latestUserMessage.content : "";
+    const isCodingPrompt = /(?:\b(code|coding|program|debug|bug|html|css|javascript|typescript|python|java|react|api|script|compile|function)\b|কোড|প্রোগ্রাম|ওয়েবসাইট|ওয়েবসাইট|বাগ|ডিবাগ)/i.test(latestPromptText);
     const payload = {
       model: candidate,
       messages: candidateMessages,
       stream: true,
-      max_tokens: 1800,
+      temperature: req._shakilGreeting ? 0.8 : (isCodingPrompt ? 0.2 : 0.4),
+      top_p: 0.9,
+      max_tokens: req._shakilGreeting ? 100 : 1800,
       ...(offerTools ? { tools, tool_choice: "auto" } : {})
     };
     let text = "";
@@ -332,11 +376,11 @@ module.exports = async function handler(req, res) {
         for (const line of lines) consumeLine(line);
       }
       if (buffer.trim()) consumeLine(buffer);
-      if (timedOut) throw new Error("OpenRouter request timed out after 23 seconds.");
+      if (timedOut) throw new Error("OpenRouter request timed out after 18 seconds.");
       return { text, toolCalls: [...calls.values()].filter(c => c.function.name), finishReason };
     } catch (error) {
       if (clientDisconnected) throw error;
-      if (timedOut) throw new Error("AI model timed out after 23 seconds.");
+      if (timedOut) throw new Error("AI model timed out after 18 seconds.");
       throw error;
     } finally {
       clearTimeout(timer);
@@ -385,19 +429,69 @@ module.exports = async function handler(req, res) {
       streamStarted = true;
     };
 
+    const latestPrompt = typeof latestUserMessage?.content === "string" ? latestUserMessage.content : "";
+    const filterEnabled = !containsForbiddenScript(latestPrompt) && !hasTranslationException(latestPrompt);
     for (const candidate of candidates) {
       if (clientDisconnected) return;
       chosenModel = candidate;
       responseText = "";
+      const filterState = createFilterState(latestPrompt);
+      let earlyBuffer = "";
+      let earlyChecked = false;
       let firstResult;
+      const deliverFiltered = raw => {
+        if (!filterEnabled) { sendText(raw); return; }
+        if (!earlyChecked) {
+          earlyBuffer += raw;
+          const chars = Array.from(earlyBuffer);
+          if (chars.length < 150) return;
+          const sample = chars.slice(0, 150);
+          let inFence = false, ticks = 0, forbiddenCount = 0, outsideCount = 0;
+          for (const ch of sample) {
+            if (ch === "`") { ticks++; if (ticks === 3) { inFence = !inFence; ticks = 0; } continue; }
+            if (ticks) ticks = 0;
+            if (!inFence) { outsideCount++; if (containsForbiddenScript(ch)) forbiddenCount++; }
+          }
+          if (forbiddenCount > 3 || forbiddenCount / Math.max(1, outsideCount) > 0.05) {
+            const drift = new Error("MODEL_EARLY_SCRIPT_DRIFT");
+            drift.code = "MODEL_EARLY_SCRIPT_DRIFT";
+            throw drift;
+          }
+          earlyChecked = true;
+          const clean = sanitizeDelta(earlyBuffer, filterState);
+          earlyBuffer = "";
+          if (clean) sendText(clean);
+          return;
+        }
+        const clean = sanitizeDelta(raw, filterState);
+        if (clean) sendText(clean);
+      };
       try {
         firstResult = await streamModel(candidate, upstreamMessages, true, chunk => {
           streamed = true;
-          sendText(chunk);
+          deliverFiltered(chunk);
         });
+        if (!earlyChecked && earlyBuffer) {
+          const chars = Array.from(earlyBuffer);
+          let inFence = false, ticks = 0, forbiddenCount = 0, outsideCount = 0;
+          for (const ch of chars) {
+            if (ch === "`") { ticks++; if (ticks === 3) { inFence = !inFence; ticks = 0; } continue; }
+            if (ticks) ticks = 0;
+            if (!inFence) { outsideCount++; if (containsForbiddenScript(ch)) forbiddenCount++; }
+          }
+          if (forbiddenCount > 3 || forbiddenCount / Math.max(1, outsideCount) > 0.05) {
+            const drift = new Error("MODEL_EARLY_SCRIPT_DRIFT");
+            drift.code = "MODEL_EARLY_SCRIPT_DRIFT";
+            throw drift;
+          }
+          earlyChecked = true;
+          const clean = sanitizeDelta(earlyBuffer, filterState);
+          earlyBuffer = "";
+          if (clean) sendText(clean);
+        }
       } catch (error) {
         if (clientDisconnected) return;
-        lastFailure = error.message || "AI model request failed.";
+        lastFailure = error.code === "MODEL_EARLY_SCRIPT_DRIFT" ? "মডেল শুরুতেই অনুপযুক্ত বিদেশি অক্ষর দিয়েছে; অন্য মডেল চেষ্টা করা হচ্ছে।" : (error.message || "AI model request failed.");
         // Once response text has reached the client, do not switch models or append a second answer.
         if (streamStarted) {
           if (!res.writableEnded) {
@@ -465,6 +559,7 @@ module.exports = async function handler(req, res) {
       }
       return;
     }
+    if (req._shakilGreeting) return respondText(req, res, greetingFallback(greeting));
     return json(res, 502, {
       error: "দুঃখিত, এই মুহূর্তে কোনো ফ্রি AI মডেল উত্তর দিতে পারছে না। কিছুক্ষণ পরে আবার চেষ্টা করো।",
       detail: lastFailure || "সব চেষ্টা করা মডেল থেকে খালি উত্তর এসেছে."
