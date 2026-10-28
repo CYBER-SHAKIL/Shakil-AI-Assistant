@@ -12,6 +12,7 @@ function secretMatches(value) {
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control","no-store");
   if (req.method !== "POST") { res.setHeader("Allow","POST"); return json(res,405,{error:"Use POST."}); }
+  if (!process.env.API_KEY_ADMIN_SECRET) return json(res,503,{error:"API_KEY_ADMIN_SECRET is not configured."});
   const ip = getClientIp(req);
   const attempts = await rateLimit("admin-keys:ip:"+ip,10,600);
   if (attempts.limited) return json(res,429,{error:"অনেকবার ভুল চেষ্টা হয়েছে। ১০ মিনিট পরে আবার চেষ্টা করো।"});
@@ -23,8 +24,15 @@ module.exports = async function handler(req, res) {
   try {
     if (action === "create") {
       const label = String(body.label || "My project").trim().slice(0,64) || "My project";
-      const key = "sk-shakil-" + crypto.randomBytes(32).toString("base64url");
-      const hash = crypto.createHash("sha256").update(key).digest("hex");
+      // Retry on the extraordinarily unlikely hash collision; never overwrite a record.
+      let key = "", hash = "";
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const candidate = "sk-shakil-" + crypto.randomBytes(32).toString("base64url");
+        const candidateHash = crypto.createHash("sha256").update(candidate).digest("hex");
+        const exists = await db("shakilApiKeys/" + candidateHash, "GET");
+        if (!exists) { key = candidate; hash = candidateHash; break; }
+      }
+      if (!key) return json(res,503,{error:"Could not allocate a unique API key. Please retry."});
       const record = {label,prefix:key.slice(0,18),createdAt:new Date().toISOString(),revoked:false};
       await db("shakilApiKeys/"+hash,"PUT",record);
       return json(res,200,{key,record,warning:"Copy this key now. It will not be shown again."});
