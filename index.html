@@ -42,6 +42,36 @@
 .message.user .message-body{order:1!important;width:fit-content!important;max-width:min(82%,680px)!important;min-width:0!important}
 .message.user .timestamp.user-timestamp{order:2!important;flex:none!important;width:auto!important;max-width:min(82%,680px)!important;margin:5px 0 0!important;padding:0 9px 0 0!important;text-align:right!important;line-height:1.4!important}
 .message.user .message-actions{order:3!important;flex:0 0 auto!important;width:100%!important;margin-top:2px!important}
+
+/* Desktop composer: make the Image control comfortably sized and balanced */
+@media (min-width: 761px) {
+  #attachBtn {
+    width: auto !important;
+    min-width: 112px !important;
+    height: 44px !important;
+    padding: 0 17px !important;
+    border-radius: 13px !important;
+    gap: 10px !important;
+    justify-content: center !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    color: var(--text) !important;
+  }
+  #attachBtn svg {
+    width: 25px !important;
+    height: 25px !important;
+    flex: 0 0 25px !important;
+    stroke-width: 2.4 !important;
+  }
+  #attachBtn .tool-label {
+    display: inline !important;
+    font-size: 14px !important;
+    line-height: 1 !important;
+  }
+  #attachBtn:hover {
+    background: var(--surface2) !important;
+  }
+}
 </style><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css"><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script><script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script></head>
 <body>
 <noscript><div style="padding:16px;background:#151925;color:#f5f7ff;font:14px/1.5 system-ui">Shakil AI Assistant needs JavaScript enabled to run. Enable JavaScript in your browser and reload this page.</div></noscript>
