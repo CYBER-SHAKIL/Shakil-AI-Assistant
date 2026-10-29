@@ -325,7 +325,7 @@ module.exports = async function handler(req, res) {
   let clientDisconnected = false;
   let activeController = null;
   // Leave a safety margin below Vercel's 60-second function deadline.
-  const requestDeadline = Date.now() + 42000;
+  const requestDeadline = Date.now() + 15000;
   res.on("close", () => {
     if (!res.writableEnded) {
       clientDisconnected = true;
@@ -343,7 +343,7 @@ module.exports = async function handler(req, res) {
       error.code = "REQUEST_DEADLINE";
       throw error;
     }
-    const modelTimeoutMs = Math.min(15000, remainingMs);
+    const modelTimeoutMs = Math.min(12000, remainingMs);
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, modelTimeoutMs);
     const latestPromptText = typeof latestUserMessage?.content === "string" ? latestUserMessage.content : "";
     const isCodingPrompt = /(?:\b(code|coding|program|debug|bug|html|css|javascript|typescript|python|java|react|api|script|compile|function)\b|কোড|প্রোগ্রাম|ওয়েবসাইট|ওয়েবসাইট|বাগ|ডিবাগ)/i.test(latestPromptText);
