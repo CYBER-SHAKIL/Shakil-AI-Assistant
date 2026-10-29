@@ -79,13 +79,23 @@ async function verifyTurnstile(req) {
   const ip = getClientIp(req);
   if (ip !== "unknown") form.set("remoteip",ip);
   try {
-    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:form});
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form,
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!response.ok) return { ok: false, configured: true, reason: "siteverify_http_" + response.status };
     const result = await response.json();
-    if (!result.success) return {ok:false,configured:true};
-    const appHost = (()=>{try{return new URL(process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app").hostname;}catch{return "";}})();
-    if (result.hostname && appHost && result.hostname !== appHost && !result.hostname.endsWith(".vercel.app")) return {ok:false,configured:true};
-    return {ok:true,configured:true};
-  } catch { return {ok:false,configured:true}; }
+    if (!result.success) return { ok: false, configured: true, reason: "siteverify_rejected", codes: Array.isArray(result["error-codes"]) ? result["error-codes"] : [] };
+    const appHost = (() => { try { return new URL(process.env.APP_URL || "").hostname; } catch { return ""; } })();
+    if (result.hostname && appHost && result.hostname !== appHost) {
+      return { ok: false, configured: true, reason: "hostname_mismatch" };
+    }
+    return { ok: true, configured: true };
+  } catch (error) {
+    return { ok: false, configured: true, reason: error?.name === "TimeoutError" || error?.name === "AbortError" ? "siteverify_timeout" : "siteverify_unreachable" };
+  }
 }
 async function requireValidKey(req) {
   const customHeader = req.headers["x-shakil-api-key"];
