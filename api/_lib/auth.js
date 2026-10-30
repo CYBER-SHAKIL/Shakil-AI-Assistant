@@ -33,42 +33,34 @@ function parseBody(req, limit=BODY_LIMIT) {
 async function rateLimit(key, limit, windowSeconds) {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  const bucketSeconds = Math.max(1, Number(windowSeconds) || 60);
-  const bucket = Math.floor(Date.now() / (bucketSeconds * 1000));
-  const bucketedKey = String(key) + ":bucket:" + bucket;
-  const safeKey = "shakil:rl:" + crypto.createHash("sha256").update(bucketedKey).digest("hex");
+  const safeKey = "shakil:rl:" + crypto.createHash("sha256").update(String(key)).digest("hex");
   if (url && token) {
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 4000);
-      let response;
-      try {
-        response = await fetch(url.replace(/\/$/, "") + "/pipeline", {
-          method: "POST",
-          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-          body: JSON.stringify([["INCR", safeKey], ["EXPIRE", safeKey, bucketSeconds + 5]]),
-          signal: controller.signal
-        });
-      } finally { clearTimeout(timer); }
-      if (!response.ok) throw new Error("Upstash pipeline failed");
+      const response = await fetch(url.replace(/\/$/,""), {
+        method:"POST", headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},
+        body:JSON.stringify(["INCR",safeKey])
+      });
+      if (!response.ok) throw new Error("Redis INCR failed");
       const data = await response.json();
-      if (!Array.isArray(data) || data.length < 2 || data[0]?.error || data[1]?.error) throw new Error("Invalid Upstash pipeline response");
-      const count = Number(data[0]?.result);
+      const count = Number(data.result);
       if (!Number.isFinite(count)) throw new Error("Invalid Redis count");
-      return { limited: count > limit, count, persistent: true };
+      if (count === 1) {
+        await fetch(url.replace(/\/$/,""), {method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify(["EXPIRE",safeKey,windowSeconds])});
+      }
+      return {limited:count>limit, count, persistent:true};
     } catch (error) {
-      console.error("Upstash rate limit unavailable; using local fallback:", error?.name === "AbortError" ? "request timed out after 4 seconds" : (error?.message || error));
+      console.error("Upstash rate limit unavailable; using local fallback:", error?.message || error);
     }
   }
   const now = Date.now();
   let item = localWindows.get(safeKey);
-  if (!item || now >= item.until) item = { count: 0, until: (bucket + 1) * bucketSeconds * 1000 };
+  if (!item || now >= item.until) item = {count:0,until:now+windowSeconds*1000};
   item.count++;
-  localWindows.set(safeKey, item);
+  localWindows.set(safeKey,item);
   if (localWindows.size > 5000) {
-    for (const [k, v] of localWindows) if (now >= v.until) localWindows.delete(k);
+    for (const [k,v] of localWindows) if (now >= v.until) localWindows.delete(k);
   }
-  return { limited: item.count > limit, count: item.count, persistent: false };
+  return {limited:item.count>limit,count:item.count,persistent:false};
 }
 async function verifyTurnstile(req) {
   const secret = process.env.TURNSTILE_SECRET_KEY;
@@ -79,41 +71,17 @@ async function verifyTurnstile(req) {
   const ip = getClientIp(req);
   if (ip !== "unknown") form.set("remoteip",ip);
   try {
-    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: form,
-      signal: AbortSignal.timeout(8000)
-    });
-    if (!response.ok) return { ok: false, configured: true, reason: "siteverify_http_" + response.status };
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:form});
     const result = await response.json();
-    if (!result.success) return { ok: false, configured: true, reason: "siteverify_rejected", codes: Array.isArray(result["error-codes"]) ? result["error-codes"] : [] };
-    const appHost = (() => { try { return new URL(process.env.APP_URL || "").hostname; } catch { return ""; } })();
-    if (result.hostname && appHost && result.hostname !== appHost) {
-      return { ok: false, configured: true, reason: "hostname_mismatch" };
-    }
-    return { ok: true, configured: true };
-  } catch (error) {
-    return { ok: false, configured: true, reason: error?.name === "TimeoutError" || error?.name === "AbortError" ? "siteverify_timeout" : "siteverify_unreachable" };
-  }
+    if (!result.success) return {ok:false,configured:true};
+    const appHost = (()=>{try{return new URL(process.env.APP_URL || "https://shakil-ai-assistant-lime.vercel.app").hostname;}catch{return "";}})();
+    if (result.hostname && appHost && result.hostname !== appHost && !result.hostname.endsWith(".vercel.app")) return {ok:false,configured:true};
+    return {ok:true,configured:true};
+  } catch { return {ok:false,configured:true}; }
 }
 async function requireValidKey(req) {
-  const customHeader = req.headers["x-shakil-api-key"];
-  const authorization = req.headers.authorization;
-  const supplied = customHeader !== undefined || authorization !== undefined;
-  if (!supplied) return {ok:false,required:false};
-  let key = "";
-  if (customHeader !== undefined) {
-    key = typeof customHeader === "string" ? customHeader.trim() : "";
-  } else {
-    const match = typeof authorization === "string" ? /^Bearer ([^\s]+)$/i.exec(authorization.trim()) : null;
-    key = match ? match[1] : "";
-  }
-  if (!key) return {ok:false,required:true};
-  try {
-    return {ok:await verifyShakilApiKey(key),required:true};
-  } catch (error) {
-    return {ok:false,required:true,unavailable:true};
-  }
+  const key = String(req.headers["x-shakil-api-key"] || (String(req.headers.authorization || "").startsWith("Bearer sk-shakil-") ? String(req.headers.authorization).slice(7) : "")).trim();
+  if (!key) return {ok:false,required:false};
+  return {ok:await verifyShakilApiKey(key),required:true};
 }
 module.exports = { BODY_LIMIT, getClientIp, json, parseBody, rateLimit, verifyTurnstile, requireValidKey, verifyShakilApiKey };
