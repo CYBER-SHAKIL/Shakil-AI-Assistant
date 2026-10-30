@@ -325,7 +325,7 @@ module.exports = async function handler(req, res) {
   let clientDisconnected = false;
   let activeController = null;
   // Leave a safety margin below Vercel's 60-second function deadline.
-  const requestDeadline = Date.now() + 15000;
+  const requestDeadline = Date.now() + 45000;
   res.on("close", () => {
     if (!res.writableEnded) {
       clientDisconnected = true;
@@ -343,7 +343,7 @@ module.exports = async function handler(req, res) {
       error.code = "REQUEST_DEADLINE";
       throw error;
     }
-    const modelTimeoutMs = Math.min(12000, remainingMs);
+    const modelTimeoutMs = Math.min(23000, remainingMs);
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, modelTimeoutMs);
     const latestPromptText = typeof latestUserMessage?.content === "string" ? latestUserMessage.content : "";
     const isCodingPrompt = /(?:\b(code|coding|program|debug|bug|html|css|javascript|typescript|python|java|react|api|script|compile|function)\b|কোড|প্রোগ্রাম|ওয়েবসাইট|ওয়েবসাইট|বাগ|ডিবাগ)/i.test(latestPromptText);
@@ -353,7 +353,7 @@ module.exports = async function handler(req, res) {
       stream: true,
       temperature: req._shakilGreeting ? 0.8 : (isCodingPrompt ? 0.2 : 0.4),
       top_p: 0.9,
-      max_tokens: req._shakilGreeting ? 100 : (isCodingPrompt ? 1200 : 900),
+      max_tokens: req._shakilGreeting ? 100 : 1800,
       ...(offerTools ? { tools, tool_choice: "auto" } : {})
     };
     let text = "";
@@ -424,11 +424,11 @@ module.exports = async function handler(req, res) {
         for (const line of lines) consumeLine(line);
       }
       if (buffer.trim()) consumeLine(buffer);
-      if (timedOut) throw new Error("OpenRouter request timed out after 18 seconds.");
+      if (timedOut) throw new Error("OpenRouter request timed out after 23 seconds.");
       return { text, toolCalls: [...calls.values()].filter(c => c.function.name), finishReason };
     } catch (error) {
       if (clientDisconnected) throw error;
-      if (timedOut) throw new Error("AI model timed out after 18 seconds.");
+      if (timedOut) throw new Error("AI model timed out after 23 seconds.");
       throw error;
     } finally {
       clearTimeout(timer);
