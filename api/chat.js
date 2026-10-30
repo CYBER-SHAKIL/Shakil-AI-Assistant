@@ -1,4 +1,4 @@
-const DEFAULT_MODEL = "openrouter/free";
+const DEFAULT_MODEL = process.env.OPENROUTER_DEFAULT_MODEL || "google/gemma-4-31b-it:free";
 const FALLBACK_MODEL = "openrouter/free";
 const BASE_PROMPT = `LANGUAGE RULE: Reply ONLY in Bengali (Bangla script) with English technical terms where needed. NEVER output Chinese, Japanese, Korean, Thai, Hindi/Devanagari, Arabic, Cyrillic or any other script. Never mix random foreign words into Bengali sentences. Use correct Bangla spelling. If unsure of a word, use a simple Bangla or English word. Exception: only when the user explicitly asks to translate into another language.
 
